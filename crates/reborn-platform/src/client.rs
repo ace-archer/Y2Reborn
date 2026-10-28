@@ -416,15 +416,85 @@ fn sd_repair_error(error: &str) -> String {
 /// The SD card is read-only between writes (Y2Linux 8.27): open (or end)
 /// Reborn's write window around a change to a file on it. Off the platform,
 /// and on a damaged card (refused), the write is simply tried.
+///
+/// The platform knows one window for all of Reborn (holder `reborn`), so
+/// Reborn counts its own users: a release reaches the platform only when the
+/// last one ends, and a playlist change never closes the card under a sync.
 pub fn sd_write_window(open: bool) -> Result<(), String> {
+    let mut users = SD_WINDOW_USERS.lock().unwrap_or_else(|e| e.into_inner());
+    if open {
+        sd_window_request(true)?;
+        *users += 1;
+        Ok(())
+    } else {
+        *users = users.saturating_sub(1);
+        if *users == 0 {
+            sd_window_request(false)
+        } else {
+            Ok(())
+        }
+    }
+}
+static SD_WINDOW_USERS: std::sync::Mutex<usize> = std::sync::Mutex::new(0);
+/// How long one request keeps the window open, and how often a long job
+/// asks again (well before it ends).
+const SD_WINDOW_SECONDS: &str = "60";
+const SD_WINDOW_RENEW: Duration = Duration::from_secs(20);
+
+fn sd_window_request(open: bool) -> Result<(), String> {
     if !crate::storage::platform_manages_media() {
         return Ok(());
     }
-    let mut args = vec!["media", "write", "--holder", "reborn", "--seconds", "60"];
+    let mut args = vec![
+        "media",
+        "write",
+        "--holder",
+        "reborn",
+        "--seconds",
+        SD_WINDOW_SECONDS,
+    ];
     if !open {
         args.push("--release");
     }
     call(&args, 15).map(|_| ())
+}
+
+/// Reborn's write window held for a long job (a Navidrome sync): opened
+/// now, asked for again every 20 s on its own thread, ended when dropped.
+pub struct SdWriteHold {
+    stop: std::sync::Arc<AtomicBool>,
+    renewer: Option<thread::JoinHandle<()>>,
+}
+impl SdWriteHold {
+    pub fn open() -> Result<Self, String> {
+        sd_write_window(true)?;
+        let stop = std::sync::Arc::new(AtomicBool::new(false));
+        let done = stop.clone();
+        let renewer = thread::Builder::new()
+            .name("sd-write-hold".into())
+            .spawn(move || {
+                let mut asked = Instant::now();
+                while !done.load(Ordering::Relaxed) {
+                    thread::sleep(Duration::from_millis(250));
+                    if asked.elapsed() >= SD_WINDOW_RENEW {
+                        asked = Instant::now();
+                        // A refusal is seen by the next write (read-only).
+                        let _ = sd_window_request(true);
+                    }
+                }
+            })
+            .ok();
+        Ok(Self { stop, renewer })
+    }
+}
+impl Drop for SdWriteHold {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(renewer) = self.renewer.take() {
+            let _ = renewer.join();
+        }
+        let _ = sd_write_window(false);
+    }
 }
 
 /// User-language text for a platform failure code. Raw service text is never
@@ -1519,6 +1589,24 @@ pub fn unobserved() -> PlatformSnapshot {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn reborns_write_window_ends_only_with_its_last_user() {
+        // Off the platform the requests are no-ops; the count is Reborn's own.
+        let users = || *super::SD_WINDOW_USERS.lock().unwrap();
+        super::sd_write_window(true).unwrap();
+        {
+            let _sync = super::SdWriteHold::open().unwrap();
+            assert_eq!(users(), 2);
+            // A playlist change ends its window during the sync...
+            super::sd_write_window(false).unwrap();
+            assert_eq!(users(), 1, "...and the sync still holds the card");
+        }
+        assert_eq!(users(), 0);
+        // An unmatched release never goes below zero.
+        super::sd_write_window(false).unwrap();
+        assert_eq!(users(), 0);
+    }
+
     use super::*;
 
     #[test]

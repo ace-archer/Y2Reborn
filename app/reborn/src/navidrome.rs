@@ -37,6 +37,8 @@ pub enum Reply {
 struct Running {
     cancel: Arc<AtomicBool>,
     progress: nd::Progress,
+    /// Copying to the SD card (inside Reborn's write window).
+    on_card: bool,
 }
 
 pub struct Navidrome {
@@ -250,10 +252,24 @@ impl Runtime {
             now_unix: now_unix.unwrap_or(0),
             reserve: nd::RESERVE,
         };
+        let on_card = self.model.settings.navidrome_target == SyncTarget::SdCard;
         let cancel = Arc::new(AtomicBool::new(false));
         let stop = cancel.clone();
         let started = self.navidrome_spawn("navidrome-sync", move |tx| {
             reborn_platform::lower_thread_priority();
+            // The card is read-only between writes (Y2Linux 8.27): the whole
+            // sync runs inside Reborn's write window, kept open as it goes.
+            let _hold = match on_card
+                .then(reborn_platform::client::SdWriteHold::open)
+                .transpose()
+            {
+                Ok(hold) => hold,
+                Err(e) => {
+                    let refused = nd::Error::Storage(format!("write window: {e}"));
+                    let _ = tx.send(Reply::Done(Err(refused), automatic));
+                    return;
+                }
+            };
             let client = nd::Client::new(account);
             let mut sent: Option<Instant> = None;
             let result = nd::sync(&client, &root, &options, &stop, &mut |p| {
@@ -270,6 +286,7 @@ impl Runtime {
         self.navidrome.running = Some(Running {
             cancel,
             progress: nd::Progress::default(),
+            on_card,
         });
         self.log.emit(
             Level::Info,
@@ -378,7 +395,7 @@ impl Runtime {
                 }
             }
             Reply::Done(result, automatic) => {
-                self.navidrome.running = None;
+                let on_card = self.navidrome.running.take().is_some_and(|r| r.on_card);
                 match result {
                     Ok(s) => {
                         self.log.emit(
@@ -438,13 +455,25 @@ impl Runtime {
                             "sync_failed",
                             "Navidrome sync stopped",
                             None,
-                            json!({"automatic": automatic, "error": e.message()}),
+                            json!({
+                                "automatic": automatic,
+                                "error": e.message(),
+                                "detail": e.detail(),
+                                "on_card": on_card,
+                            }),
                         );
                         // Disconnect stopped it and said so already.
                         let disconnected =
                             e == nd::Error::Cancelled && self.navidrome.account.is_none();
                         if !(automatic && e.retry_later()) && !disconnected {
-                            self.ui.flash(e.message());
+                            self.ui.flash(match e {
+                                // As for playlists: a card with errors, or one
+                                // being checked, refuses its write window.
+                                nd::Error::Storage(_) if on_card => {
+                                    "The SD card can't be changed right now. If it has errors, repair it in Settings > Storage.".to_owned()
+                                }
+                                e => e.message(),
+                            });
                         }
                     }
                 }

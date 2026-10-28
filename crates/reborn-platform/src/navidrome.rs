@@ -168,6 +168,14 @@ impl Error {
     pub fn retry_later(&self) -> bool {
         matches!(self, Self::Offline(_))
     }
+    /// What went wrong underneath, for the log (no secrets: curl exit
+    /// codes, I/O errors, the server's own message).
+    pub fn detail(&self) -> Option<&str> {
+        match self {
+            Self::Offline(d) | Self::Storage(d) | Self::Refused(_, d) => Some(d),
+            _ => None,
+        }
+    }
     /// For the listener, in Reborn's words.
     pub fn message(&self) -> String {
         match self {

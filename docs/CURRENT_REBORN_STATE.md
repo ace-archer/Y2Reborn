@@ -16,6 +16,10 @@
   so it is not taken for the player's own), plus `Navidrome/.sync.json` listing what the sync put there (it travels
   with the card). The list is saved at most every 60 s during a sync and on every stop. Only listed files are ever
   replaced or removed; each song is downloaded to a hidden `.part` and renamed whole; at least 256 MiB stay free. Songs the server refuses are counted and tried again next time.
+- On the SD card (read-only between writes since Y2Linux 8.27) the whole sync runs inside Reborn's write window:
+  `client::SdWriteHold` opens it and asks again every 20 s; Reborn counts its own users of the one `reborn` holder, so a
+  playlist change ending its window never closes the card under a sync. A refused window (a card with errors or being
+  checked) stops the sync with the playlists' wording; the log carries the underlying error (`detail`).
 - A sync keeps the player awake and Wi-Fi up (`automatic_sleep_tick`, `wifi_idle_tick` count it as work), stops when a
   computer opens the drives or the chosen card goes away, and asks for a quick library scan when it changed anything.
   Wrong login on a sync forgets the account. Disconnect and Reset Settings forget the account; synced music stays.
