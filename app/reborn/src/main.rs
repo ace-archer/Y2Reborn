@@ -5,13 +5,13 @@ mod books;
 mod diagnostics;
 mod graphics_recovery;
 mod meter;
-mod navidrome;
 mod performance;
 mod playback;
 mod playlists;
 mod scrobbling;
 mod skins;
 mod sleep_timer;
+mod subsonic;
 mod volume;
 use reborn_control::{Command, PlaybackAction, Response};
 use reborn_core::platform::{Fact, LowBattery};
@@ -305,8 +305,8 @@ struct Runtime {
     clock_trusted: Option<(Instant, bool)>,
     /// Last.fm: the app's key, the listener's session, sign-in and sending.
     lastfm: scrobbling::LastFm,
-    /// Navidrome: the account, the sync running and the automatic sync.
-    navidrome: navidrome::Navidrome,
+    /// Subsonic: the account, the sync running and the automatic sync.
+    subsonic: subsonic::Subsonic,
     /// Station logos: downloads (once per logo) and the logo shown as Now
     /// Playing's picture.
     radio_logos: Option<LogoFetcher>,
@@ -2565,7 +2565,7 @@ impl Runtime {
             }
             Effect::CancelDownload => client::abort_download(),
             Effect::Radio(request) => self.radio(request)?,
-            // As for Navidrome: a refusal is already in the listener's words.
+            // As for Subsonic: a refusal is already in the listener's words.
             Effect::LastFm(request) => {
                 if let Err(said) = self.lastfm_request(request) {
                     self.ui.flash(said);
@@ -2585,26 +2585,26 @@ impl Runtime {
             }
             // A refusal is the page's answer in the listener's words ("Connect
             // to Wi-Fi first"), not a failure for `friendly_error` to replace.
-            Effect::Navidrome(request) => {
-                if let Err(said) = self.navidrome_request(request) {
+            Effect::Subsonic(request) => {
+                if let Err(said) = self.subsonic_request(request) {
                     self.ui.flash(said);
                 }
             }
-            Effect::SetNavidromeAuto(on) => {
-                self.model.settings.navidrome_auto = on;
+            Effect::SetSubsonicAuto(on) => {
+                self.model.settings.subsonic_auto = on;
                 self.checkpoint();
             }
-            Effect::SetNavidromeTarget(target) => {
-                self.model.settings.navidrome_target = target;
+            Effect::SetSubsonicTarget(target) => {
+                self.model.settings.subsonic_target = target;
                 self.checkpoint();
-                self.navidrome_view();
+                self.subsonic_view();
             }
-            Effect::SetNavidromeScope(scope) => {
-                self.model.settings.navidrome_scope = scope;
+            Effect::SetSubsonicScope(scope) => {
+                self.model.settings.subsonic_scope = scope;
                 self.checkpoint();
             }
-            Effect::SetNavidromeQuality(quality) => {
-                self.model.settings.navidrome_quality = quality;
+            Effect::SetSubsonicQuality(quality) => {
+                self.model.settings.subsonic_quality = quality;
                 self.checkpoint();
             }
             Effect::Playlist(request) => self.playlist(*request)?,
@@ -3062,8 +3062,8 @@ impl Runtime {
             Effect::ResetSettings => {
                 // The Last.fm sign-in is a setting too: forget it and its plays.
                 self.lastfm_forget();
-                // So is the Navidrome sign-in (the synced music stays).
-                self.navidrome_forget();
+                // So is the Subsonic sign-in (the synced music stays).
+                self.subsonic_forget();
                 // Volume and the music location are part of the session, not
                 // preferences a reset should surprise the listener with.
                 let defaults = reborn_core::Settings {
@@ -3846,7 +3846,7 @@ impl Runtime {
         );
         let busy = self.model.platform.busy.is_some()
             || self.ui.wifi.scan.active()
-            || self.navidrome.busy();
+            || self.subsonic.busy();
         let on_battery =
             self.model.platform.battery.charging == reborn_core::platform::ChargingState::OnBattery;
         if !reborn_core::platform::wifi_idle_power_down(
@@ -3921,7 +3921,7 @@ impl Runtime {
             || self.pending_reconfiguration.is_some()
             || self.model.library.scanning
             || self.query.is_some()
-            || self.navidrome.busy();
+            || self.subsonic.busy();
         if playing || busy || !self.model.screen_off {
             self.sleep_attempt = Some(Instant::now());
             return;
@@ -4874,7 +4874,7 @@ fn run() -> Result<(), String> {
         scrobble_queue: reborn_platform::scrobble::Queue::new(root.join("state/scrobbles.jsonl")),
         clock_trusted: None,
         lastfm: scrobbling::LastFm::load(&root),
-        navidrome: navidrome::Navidrome::load(&root),
+        subsonic: subsonic::Subsonic::load(&root),
         radio_logos: if headless {
             None
         } else {
@@ -4917,7 +4917,7 @@ fn run() -> Result<(), String> {
         .map(|s| s.key().to_owned())
         .collect();
     rt.lastfm_view();
-    rt.navidrome_view();
+    rt.subsonic_view();
     if !rt.model.settings.theme.is_empty() {
         let id = rt.model.settings.theme.clone();
         // A skin on a missing SD card or a refused skin falls back to Reborn's
@@ -5780,7 +5780,7 @@ fn run() -> Result<(), String> {
         rt.scrobble_tick();
         rt.note_history();
         rt.lastfm_tick();
-        rt.navidrome_tick();
+        rt.subsonic_tick();
         let mut bt_lost = false;
         if let Some(service) = &rt.bluetooth {
             while let Ok(s) = service.events.try_recv() {
@@ -6247,8 +6247,8 @@ fn run() -> Result<(), String> {
             rt.loud_listening_tick(periodic.elapsed());
             periodic = Instant::now();
             rt.automatic_sleep_tick();
-            // A card in or out changes what Navidrome can sync to.
-            rt.navidrome_view();
+            // A card in or out changes what Subsonic can sync to.
+            rt.subsonic_view();
             if rt.background.update(
                 &rt.model.settings.music_directory,
                 &rt.model.sources,

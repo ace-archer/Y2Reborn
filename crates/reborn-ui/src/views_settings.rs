@@ -851,7 +851,7 @@ fn storage(c: &mut Canvas, m: &AppModel, page: &Page, focus: usize, interactive:
     }
     let top = 40. + 2. * 84.;
     // Every row fits without scrolling: rows shrink from 44 px as the
-    // occasional ones (a computer, setup, repair) join Scan and Navidrome.
+    // occasional ones (a computer, setup, repair) join Scan and Subsonic.
     let row_h = ((HEIGHT - top - 6.) / page.rows.len().max(1) as f32)
         .floor()
         .min(44.);

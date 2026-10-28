@@ -459,7 +459,7 @@ fn sd_window_request(open: bool) -> Result<(), String> {
     call(&args, 15).map(|_| ())
 }
 
-/// Reborn's write window held for a long job (a Navidrome sync): opened
+/// Reborn's write window held for a long job (a Subsonic sync): opened
 /// now, asked for again every 20 s on its own thread, ended when dropped.
 pub struct SdWriteHold {
     stop: std::sync::Arc<AtomicBool>,

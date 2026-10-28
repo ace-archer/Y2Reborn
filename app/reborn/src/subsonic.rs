@@ -1,5 +1,5 @@
-//! Navidrome sync on the player: the sign-in check, the sync worker and the
-//! automatic daily sync (`reborn_platform::navidrome` does the copying).
+//! Subsonic sync on the player: the sign-in check, the sync worker and the
+//! automatic daily sync (`reborn_platform::subsonic` does the copying).
 //!
 //! One sync runs at a time, in its own thread at a lower priority, and
 //! answers on a channel; the main loop never waits for it. While it runs the
@@ -8,11 +8,11 @@
 //! the chosen storage goes away, and the library is scanned once it changed
 //! anything. No secret is ever logged.
 use crate::Runtime;
-use reborn_core::navidrome::{NavidromeRequest, SyncTarget};
 use reborn_core::platform::{SdCard, UsbTransfer};
+use reborn_core::subsonic::{SubsonicRequest, SyncTarget};
 use reborn_core::{Event, MediaSource};
 use reborn_observability::Level;
-use reborn_platform::navidrome as nd;
+use reborn_platform::subsonic as api;
 use reborn_ui::WifiStatus;
 use serde_json::json;
 use std::path::{Path, PathBuf};
@@ -29,21 +29,21 @@ const AUTO_RETRY: Duration = Duration::from_secs(30 * 60);
 const PROGRESS_EVERY: Duration = Duration::from_millis(500);
 
 pub enum Reply {
-    SignedIn(Result<nd::Account, nd::Error>),
-    Progress(nd::Progress),
+    SignedIn(Result<api::Account, api::Error>),
+    Progress(api::Progress),
     /// The sync's outcome, and whether it was the automatic one.
-    Done(Result<nd::Summary, nd::Error>, bool),
+    Done(Result<api::Summary, api::Error>, bool),
 }
 
 struct Running {
     cancel: Arc<AtomicBool>,
-    progress: nd::Progress,
+    progress: api::Progress,
     /// Copying to the SD card (inside Reborn's write window).
     on_card: bool,
 }
 
-pub struct Navidrome {
-    account: Option<nd::Account>,
+pub struct Subsonic {
+    account: Option<api::Account>,
     account_path: PathBuf,
     signing_in: bool,
     running: Option<Running>,
@@ -57,11 +57,11 @@ pub struct Navidrome {
     next_auto: Instant,
     replies: (Sender<Reply>, Receiver<Reply>),
 }
-impl Navidrome {
+impl Subsonic {
     pub fn load(root: &Path) -> Self {
-        let account_path = nd::account_path(root);
+        let account_path = api::account_path(root);
         Self {
-            account: nd::load_account(&account_path),
+            account: api::load_account(&account_path),
             account_path,
             signing_in: false,
             running: None,
@@ -83,8 +83,8 @@ impl Navidrome {
 impl Runtime {
     /// Where synced music goes now: Internal Storage, or the SD card while
     /// one is in and writable.
-    fn navidrome_root(&self) -> Option<PathBuf> {
-        match self.model.settings.navidrome_target {
+    fn subsonic_root(&self) -> Option<PathBuf> {
+        match self.model.settings.subsonic_target {
             SyncTarget::Internal => Some(self.model.settings.music_directory.clone()),
             SyncTarget::SdCard => {
                 let writable = !matches!(
@@ -106,14 +106,14 @@ impl Runtime {
     }
     /// On a network: a server at home answers without the internet, so
     /// "No Internet" counts too (as for radio), unlike Last.fm.
-    fn navidrome_online(&self) -> bool {
+    fn subsonic_online(&self) -> bool {
         matches!(
             self.ui.wifi.status,
             WifiStatus::Connected(_) | WifiStatus::NoInternet(_)
         )
     }
     /// A computer has the drives open: nothing may write to them.
-    fn navidrome_usb_busy(&self) -> bool {
+    fn subsonic_usb_busy(&self) -> bool {
         matches!(
             self.model.platform.snapshot.usb,
             UsbTransfer::Ready | UsbTransfer::Copying | UsbTransfer::Starting
@@ -121,27 +121,27 @@ impl Runtime {
     }
     /// What the chosen storage's last sync left, read again when the storage
     /// changed (another choice, a card inserted).
-    fn navidrome_known(&mut self) {
-        let root = self.navidrome_root();
-        if root == self.navidrome.known_root {
+    fn subsonic_known(&mut self) {
+        let root = self.subsonic_root();
+        if root == self.subsonic.known_root {
             return;
         }
-        let manifest = root.as_deref().map(nd::load_manifest).unwrap_or_default();
+        let manifest = root.as_deref().map(api::load_manifest).unwrap_or_default();
         let same = self
-            .navidrome
+            .subsonic
             .account
             .as_ref()
             .is_some_and(|a| a.server == manifest.server && a.username == manifest.username);
-        self.navidrome.synced_at = if same { manifest.synced_at } else { 0 };
-        self.navidrome.last = (same && manifest.synced_at > 0)
+        self.subsonic.synced_at = if same { manifest.synced_at } else { 0 };
+        self.subsonic.last = (same && manifest.synced_at > 0)
             .then_some((manifest.songs.len(), manifest.playlists.len()));
-        self.navidrome.known_root = root;
+        self.subsonic.known_root = root;
     }
-    /// What Settings > Storage > Navidrome shows.
-    pub(crate) fn navidrome_view(&mut self) {
-        self.navidrome_known();
-        let n = &self.navidrome;
-        let view = reborn_ui::NavidromeView {
+    /// What Settings > Storage > Subsonic shows.
+    pub(crate) fn subsonic_view(&mut self) {
+        self.subsonic_known();
+        let n = &self.subsonic;
+        let view = reborn_ui::SubsonicView {
             account: n
                 .account
                 .as_ref()
@@ -154,102 +154,95 @@ impl Runtime {
             last: n.last,
             target_missing: n.known_root.is_none(),
         };
-        if view != self.ui.navidrome {
-            self.ui.navidrome = view;
+        if view != self.ui.subsonic {
+            self.ui.subsonic = view;
             self.dirty.mark_render();
         }
     }
-    fn navidrome_spawn(
-        &self,
-        name: &str,
-        job: impl FnOnce(Sender<Reply>) + Send + 'static,
-    ) -> bool {
-        let reply = self.navidrome.replies.0.clone();
+    fn subsonic_spawn(&self, name: &str, job: impl FnOnce(Sender<Reply>) + Send + 'static) -> bool {
+        let reply = self.subsonic.replies.0.clone();
         std::thread::Builder::new()
             .name(name.into())
             .spawn(move || job(reply))
             .is_ok()
     }
-    /// Settings > Storage > Navidrome.
-    pub(crate) fn navidrome_request(&mut self, request: NavidromeRequest) -> Result<(), String> {
+    /// Settings > Storage > Subsonic.
+    pub(crate) fn subsonic_request(&mut self, request: SubsonicRequest) -> Result<(), String> {
         let result = match request {
-            NavidromeRequest::Login { .. } | NavidromeRequest::SyncNow
-                if !self.navidrome_online() =>
-            {
+            SubsonicRequest::Login { .. } | SubsonicRequest::SyncNow if !self.subsonic_online() => {
                 Err("Connect to Wi-Fi first".to_owned())
             }
-            NavidromeRequest::Login { .. } if self.navidrome.signing_in => Ok(()),
-            NavidromeRequest::Login {
+            SubsonicRequest::Login { .. } if self.subsonic.signing_in => Ok(()),
+            SubsonicRequest::Login {
                 server,
                 username,
                 password,
-            } => match nd::server_address(&server) {
+            } => match api::server_address(&server) {
                 None => Err("That isn't a server address".to_owned()),
                 // Certificate checks need the right date.
                 Some(server) if server.starts_with("https") && self.trusted_unix().is_none() => {
                     Err("The clock isn't set yet; try again in a moment".to_owned())
                 }
                 Some(server) => {
-                    let account = nd::Account::new(server, username, &password);
-                    self.navidrome.signing_in =
-                        self.navidrome_spawn("navidrome-login", move |tx| {
-                            let checked = nd::Client::new(account.clone()).ping().map(|_| account);
-                            let _ = tx.send(Reply::SignedIn(checked));
-                        });
+                    let account = api::Account::new(server, username, &password);
+                    self.subsonic.signing_in = self.subsonic_spawn("subsonic-login", move |tx| {
+                        let checked = api::Client::new(account.clone()).ping().map(|_| account);
+                        let _ = tx.send(Reply::SignedIn(checked));
+                    });
                     Ok(())
                 }
             },
-            NavidromeRequest::SyncNow => self.navidrome_start(false),
-            NavidromeRequest::Cancel => {
-                if let Some(r) = &self.navidrome.running {
+            SubsonicRequest::SyncNow => self.subsonic_start(false),
+            SubsonicRequest::Cancel => {
+                if let Some(r) = &self.subsonic.running {
                     r.cancel.store(true, Ordering::Relaxed);
                 }
                 Ok(())
             }
-            NavidromeRequest::Disconnect => {
-                self.navidrome_forget();
-                self.ui.flash("Disconnected from Navidrome");
+            SubsonicRequest::Disconnect => {
+                self.subsonic_forget();
+                self.ui.flash("Disconnected from the server");
                 Ok(())
             }
         };
-        self.navidrome_view();
+        self.subsonic_view();
         result
     }
     /// Forget the account (a running sync stops). Synced music stays: it is
     /// the listener's music now, removable like any other.
-    pub(crate) fn navidrome_forget(&mut self) {
-        if let Some(r) = &self.navidrome.running {
+    pub(crate) fn subsonic_forget(&mut self) {
+        if let Some(r) = &self.subsonic.running {
             r.cancel.store(true, Ordering::Relaxed);
         }
-        if let Err(e) = nd::forget_account(&self.navidrome.account_path) {
+        if let Err(e) = api::forget_account(&self.subsonic.account_path) {
             self.log.emit(
                 Level::Warn,
-                "navidrome",
+                "subsonic",
                 "forget_failed",
-                "Navidrome sign-in not removed",
+                "Subsonic sign-in not removed",
                 None,
                 json!({"error": e.to_string()}),
             );
         }
-        self.navidrome.account = None;
-        self.navidrome.known_root = None;
-        self.navidrome_view();
+        self.subsonic.account = None;
+        self.subsonic.known_root = None;
+        self.subsonic_view();
     }
-    fn navidrome_start(&mut self, automatic: bool) -> Result<(), String> {
-        if self.navidrome.running.is_some() {
+    fn subsonic_start(&mut self, automatic: bool) -> Result<(), String> {
+        if self.subsonic.running.is_some() {
             return Ok(());
         }
         let account = self
-            .navidrome
+            .subsonic
             .account
             .clone()
-            .ok_or("Sign in to Navidrome first")?;
-        if self.navidrome_usb_busy() {
+            .ok_or("Sign in to a server first")?;
+        if self.subsonic_usb_busy() {
             return Err("Unplug from the computer first".into());
         }
         let root = self
-            .navidrome_root()
-            .ok_or(match self.model.settings.navidrome_target {
+            .subsonic_root()
+            .ok_or(match self.model.settings.subsonic_target {
                 SyncTarget::SdCard => "Insert a working SD card first",
                 SyncTarget::Internal => "Internal Storage isn't ready",
             })?;
@@ -257,16 +250,16 @@ impl Runtime {
         if account.server.starts_with("https") && now_unix.is_none() {
             return Err("The clock isn't set yet; try again in a moment".into());
         }
-        let options = nd::Options {
-            scope: self.model.settings.navidrome_scope,
-            quality: self.model.settings.navidrome_quality,
+        let options = api::Options {
+            scope: self.model.settings.subsonic_scope,
+            quality: self.model.settings.subsonic_quality,
             now_unix: now_unix.unwrap_or(0),
-            reserve: nd::RESERVE,
+            reserve: api::RESERVE,
         };
-        let on_card = self.model.settings.navidrome_target == SyncTarget::SdCard;
+        let on_card = self.model.settings.subsonic_target == SyncTarget::SdCard;
         let cancel = Arc::new(AtomicBool::new(false));
         let stop = cancel.clone();
-        let started = self.navidrome_spawn("navidrome-sync", move |tx| {
+        let started = self.subsonic_spawn("subsonic-sync", move |tx| {
             reborn_platform::lower_thread_priority();
             // The card is read-only between writes (Y2Linux 8.27): the whole
             // sync runs inside Reborn's write window, kept open as it goes.
@@ -276,14 +269,14 @@ impl Runtime {
             {
                 Ok(hold) => hold,
                 Err(e) => {
-                    let refused = nd::Error::Storage(format!("write window: {e}"));
+                    let refused = api::Error::Storage(format!("write window: {e}"));
                     let _ = tx.send(Reply::Done(Err(refused), automatic));
                     return;
                 }
             };
-            let client = nd::Client::new(account);
+            let client = api::Client::new(account);
             let mut sent: Option<Instant> = None;
-            let result = nd::sync(&client, &root, &options, &stop, &mut |p| {
+            let result = api::sync(&client, &root, &options, &stop, &mut |p| {
                 if sent.is_none_or(|at| at.elapsed() >= PROGRESS_EVERY) {
                     sent = Some(Instant::now());
                     let _ = tx.send(Reply::Progress(p));
@@ -294,47 +287,47 @@ impl Runtime {
         if !started {
             return Err("Couldn't start the sync".into());
         }
-        self.navidrome.running = Some(Running {
+        self.subsonic.running = Some(Running {
             cancel,
-            progress: nd::Progress::default(),
+            progress: api::Progress::default(),
             on_card,
         });
         self.log.emit(
             Level::Info,
-            "navidrome",
+            "subsonic",
             "sync_started",
-            "Navidrome sync started",
+            "Subsonic sync started",
             None,
             json!({
                 "automatic": automatic,
-                "target": self.model.settings.navidrome_target,
-                "scope": self.model.settings.navidrome_scope,
-                "quality": self.model.settings.navidrome_quality,
+                "target": self.model.settings.subsonic_target,
+                "scope": self.model.settings.subsonic_scope,
+                "quality": self.model.settings.subsonic_quality,
             }),
         );
         Ok(())
     }
     /// Replies, stopping a sync that may no longer write, the scan after it,
     /// and the automatic sync.
-    pub(crate) fn navidrome_tick(&mut self) {
-        let replies: Vec<Reply> = self.navidrome.replies.1.try_iter().collect();
+    pub(crate) fn subsonic_tick(&mut self) {
+        let replies: Vec<Reply> = self.subsonic.replies.1.try_iter().collect();
         for reply in replies {
-            self.navidrome_reply(reply);
+            self.subsonic_reply(reply);
         }
-        if let Some(r) = &self.navidrome.running {
+        if let Some(r) = &self.subsonic.running {
             // (Checked in place: this runs every frame while syncing.)
-            let card_gone = self.model.settings.navidrome_target == SyncTarget::SdCard
+            let card_gone = self.model.settings.subsonic_target == SyncTarget::SdCard
                 && !self
                     .model
                     .sources
                     .iter()
                     .any(|s| s.online && matches!(s.kind, MediaSource::SdCard(_)));
-            if card_gone || self.navidrome_usb_busy() {
+            if card_gone || self.subsonic_usb_busy() {
                 r.cancel.store(true, Ordering::Relaxed);
             }
         }
-        if self.navidrome.scan_wanted && !self.model.library.scanning {
-            self.navidrome.scan_wanted = false;
+        if self.subsonic.scan_wanted && !self.model.library.scanning {
+            self.subsonic.scan_wanted = false;
             self.model.apply(Event::LibraryScanStarted);
             if let Err(error) = self.scanner.scan(self.model.sources.clone()) {
                 self.model.apply(Event::LibraryScanFailed(error));
@@ -342,78 +335,76 @@ impl Runtime {
             self.dirty.mark_render();
         }
         let now = Instant::now();
-        if !self.model.settings.navidrome_auto
-            || self.navidrome.account.is_none()
-            || self.navidrome.running.is_some()
-            || self.navidrome.signing_in
-            || now < self.navidrome.next_auto
+        if !self.model.settings.subsonic_auto
+            || self.subsonic.account.is_none()
+            || self.subsonic.running.is_some()
+            || self.subsonic.signing_in
+            || now < self.subsonic.next_auto
             || self.sleep_prepared
-            || !self.navidrome_online()
+            || !self.subsonic_online()
         {
             return;
         }
-        self.navidrome.next_auto = now + AUTO_RETRY;
+        self.subsonic.next_auto = now + AUTO_RETRY;
         // Once a day by the wall clock, so a trusted one is needed.
         let Some(now_unix) = self.trusted_unix() else {
             return;
         };
-        self.navidrome_view();
-        if now_unix - self.navidrome.synced_at < AUTO_EVERY_S {
+        self.subsonic_view();
+        if now_unix - self.subsonic.synced_at < AUTO_EVERY_S {
             return;
         }
-        if let Err(reason) = self.navidrome_start(true) {
+        if let Err(reason) = self.subsonic_start(true) {
             self.log.emit(
                 Level::Info,
-                "navidrome",
+                "subsonic",
                 "auto_skipped",
-                "Automatic Navidrome sync not started",
+                "Automatic Subsonic sync not started",
                 None,
                 json!({"reason": reason}),
             );
         }
-        self.navidrome_view();
+        self.subsonic_view();
     }
-    fn navidrome_reply(&mut self, reply: Reply) {
+    fn subsonic_reply(&mut self, reply: Reply) {
         match reply {
             Reply::SignedIn(result) => {
-                self.navidrome.signing_in = false;
+                self.subsonic.signing_in = false;
                 match result {
                     Ok(account) => {
-                        if let Err(e) = nd::save_account(&self.navidrome.account_path, &account) {
-                            self.ui
-                                .flash(format!("Couldn't save the Navidrome sign-in: {e}"));
+                        if let Err(e) = api::save_account(&self.subsonic.account_path, &account) {
+                            self.ui.flash(format!("Couldn't save the sign-in: {e}"));
                         } else {
-                            self.ui
-                                .flash(format!("Signed in to Navidrome as {}", account.username));
+                            self.ui.flash(format!("Signed in as {}", account.username));
                             self.log.emit(
                                 Level::Info,
-                                "navidrome",
+                                "subsonic",
                                 "connected",
-                                "Navidrome connected",
+                                "Subsonic connected",
                                 None,
                                 json!({"https": account.server.starts_with("https")}),
                             );
-                            self.navidrome.account = Some(account);
-                            self.navidrome.known_root = None;
+                            self.subsonic.account = Some(account);
+                            self.subsonic.known_root = None;
                         }
                     }
                     Err(e) => self.ui.flash(e.message()),
                 }
             }
             Reply::Progress(p) => {
-                if let Some(r) = &mut self.navidrome.running {
+                if let Some(r) = &mut self.subsonic.running {
                     r.progress = p;
                 }
             }
             Reply::Done(result, automatic) => {
-                let on_card = self.navidrome.running.take().is_some_and(|r| r.on_card);
+                let on_card = self.subsonic.running.take().is_some_and(|r| r.on_card);
                 match result {
                     Ok(s) => {
                         self.log.emit(
                             Level::Info,
-                            "navidrome",
+                            "subsonic",
                             "synced",
-                            "Navidrome sync finished",
+                            "Subsonic sync finished",
                             None,
                             json!({
                                 "automatic": automatic,
@@ -425,9 +416,9 @@ impl Runtime {
                                 "full": s.full,
                             }),
                         );
-                        self.navidrome.known_root = None;
+                        self.subsonic.known_root = None;
                         if s.downloaded > 0 || s.removed > 0 || s.playlists > 0 {
-                            self.navidrome.scan_wanted = true;
+                            self.subsonic.scan_wanted = true;
                         }
                         let said = if s.full {
                             Some("Storage is full; some songs were left out".to_owned())
@@ -445,26 +436,26 @@ impl Runtime {
                             ))
                         } else {
                             // The automatic sync says nothing when nothing changed.
-                            (!automatic).then(|| "Navidrome is up to date".to_owned())
+                            (!automatic).then(|| "Everything is up to date".to_owned())
                         };
                         if let Some(said) = said {
                             self.ui.flash(said);
                         }
                     }
-                    Err(nd::Error::WrongLogin) => {
+                    Err(api::Error::WrongLogin) => {
                         // The password changed on the server: sign in again.
-                        self.navidrome_forget();
-                        self.ui.flash("Sign in to Navidrome again");
+                        self.subsonic_forget();
+                        self.ui.flash("Sign in to the server again");
                     }
                     Err(e) => {
                         // Partly copied: what is there now is scanned too.
-                        self.navidrome.scan_wanted = true;
-                        self.navidrome.known_root = None;
+                        self.subsonic.scan_wanted = true;
+                        self.subsonic.known_root = None;
                         self.log.emit(
                             Level::Warn,
-                            "navidrome",
+                            "subsonic",
                             "sync_failed",
-                            "Navidrome sync stopped",
+                            "Subsonic sync stopped",
                             None,
                             json!({
                                 "automatic": automatic,
@@ -475,12 +466,12 @@ impl Runtime {
                         );
                         // Disconnect stopped it and said so already.
                         let disconnected =
-                            e == nd::Error::Cancelled && self.navidrome.account.is_none();
+                            e == api::Error::Cancelled && self.subsonic.account.is_none();
                         if !(automatic && e.retry_later()) && !disconnected {
                             self.ui.flash(match e {
                                 // As for playlists: a card with errors, or one
                                 // being checked, refuses its write window.
-                                nd::Error::Storage(_) if on_card => {
+                                api::Error::Storage(_) if on_card => {
                                     "The SD card can't be changed right now. If it has errors, repair it in Settings > Storage.".to_owned()
                                 }
                                 e => e.message(),
@@ -490,6 +481,6 @@ impl Runtime {
                 }
             }
         }
-        self.navidrome_view();
+        self.subsonic_view();
     }
 }

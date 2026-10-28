@@ -4,12 +4,12 @@ pub mod books;
 pub mod clock;
 mod countries;
 pub mod eq;
-pub mod navidrome;
 pub mod platform;
 pub mod playlist;
 pub mod queue;
 pub mod scrobble;
 pub mod sort;
+pub mod subsonic;
 mod zones;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -928,8 +928,8 @@ pub enum Screen {
     Playlists,
     /// Settings > Last.fm: sign-in, scrobbling and the scrobbler log.
     LastFm,
-    /// Settings > Storage > Navidrome: sign-in, sync and where it goes.
-    Navidrome,
+    /// Settings > Storage > Subsonic: sign-in, sync and where it goes.
+    Subsonic,
     /// One playlist; the navigation filter holds its file's path.
     Playlist,
     /// About & Updates > Error Reports; filter "info": what is sent, "save":
@@ -1196,15 +1196,15 @@ pub struct Settings {
     pub lastfm_scrobble: bool,
     #[serde(default = "default_true")]
     pub lastfm_now_playing: bool,
-    /// With a Navidrome account: sync on Wi-Fi at most once a day.
+    /// With a Subsonic account: sync on Wi-Fi at most once a day.
     #[serde(default)]
-    pub navidrome_auto: bool,
+    pub subsonic_auto: bool,
     #[serde(default)]
-    pub navidrome_target: navidrome::SyncTarget,
+    pub subsonic_target: subsonic::SyncTarget,
     #[serde(default)]
-    pub navidrome_scope: navidrome::SyncScope,
+    pub subsonic_scope: subsonic::SyncScope,
     #[serde(default)]
-    pub navidrome_quality: navidrome::SyncQuality,
+    pub subsonic_quality: subsonic::SyncQuality,
     /// The one-time "Set Up Internal Storage?" question was shown.
     #[serde(default)]
     pub internal_setup_asked: bool,
@@ -1551,10 +1551,10 @@ impl Default for Settings {
             scrobble_log: false,
             lastfm_scrobble: true,
             lastfm_now_playing: true,
-            navidrome_auto: false,
-            navidrome_target: navidrome::SyncTarget::Internal,
-            navidrome_scope: navidrome::SyncScope::All,
-            navidrome_quality: navidrome::SyncQuality::Original,
+            subsonic_auto: false,
+            subsonic_target: subsonic::SyncTarget::Internal,
+            subsonic_scope: subsonic::SyncScope::All,
+            subsonic_quality: subsonic::SyncQuality::Original,
             internal_setup_asked: false,
             hp_level: HpLevel::Low,
             volume_scale: VOLUME_SCALE,
@@ -1825,11 +1825,11 @@ pub enum Effect {
     SetScrobbleLog(bool),
     SetLastFmScrobble(bool),
     SetLastFmNowPlaying(bool),
-    Navidrome(navidrome::NavidromeRequest),
-    SetNavidromeAuto(bool),
-    SetNavidromeTarget(navidrome::SyncTarget),
-    SetNavidromeScope(navidrome::SyncScope),
-    SetNavidromeQuality(navidrome::SyncQuality),
+    Subsonic(subsonic::SubsonicRequest),
+    SetSubsonicAuto(bool),
+    SetSubsonicTarget(subsonic::SyncTarget),
+    SetSubsonicScope(subsonic::SyncScope),
+    SetSubsonicQuality(subsonic::SyncQuality),
     SetCodecPreference(CodecPreference),
     Play(usize),
     PlayShuffled(usize),

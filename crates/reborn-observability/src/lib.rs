@@ -44,7 +44,7 @@ pub const SUBSYSTEMS: &[&str] = &[
     "clock",
     "platform",
     "lastfm",
-    "navidrome",
+    "subsonic",
     "scrobble",
     "books",
 ];

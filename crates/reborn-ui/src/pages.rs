@@ -192,7 +192,7 @@ pub fn page(ui: &Ui, m: &AppModel, tracks: &[Track]) -> Page {
         Screen::PcTransfer => pc_transfer(m),
         Screen::SettingsAudio => sound(ui, m),
         Screen::LastFm => lastfm(ui, m),
-        Screen::Navidrome => navidrome(ui, m),
+        Screen::Subsonic => subsonic(ui, m),
         Screen::Equalizer => equalizer(ui, m),
         Screen::Crossfade => crossfade(m),
         Screen::Balance => balance(m),
@@ -414,9 +414,9 @@ fn lastfm(ui: &Ui, m: &AppModel) -> Page {
     ])
 }
 
-/// What Settings > Storage says about Navidrome sync.
-fn navidrome_summary(ui: &Ui) -> String {
-    let n = &ui.navidrome;
+/// What Settings > Storage says about Subsonic sync.
+fn subsonic_summary(ui: &Ui) -> String {
+    let n = &ui.subsonic;
     match (&n.account, n.running) {
         (None, _) => "Off".into(),
         (Some(_), Some((done, total))) if total > 0 => format!(
@@ -429,28 +429,28 @@ fn navidrome_summary(ui: &Ui) -> String {
     }
 }
 
-/// Settings > Storage > Navidrome: sign-in, then Sync Now (Cancel while it
+/// Settings > Storage > Subsonic: sign-in, then Sync Now (Cancel while it
 /// runs), the automatic sync and where and what it copies.
-fn navidrome(ui: &Ui, m: &AppModel) -> Page {
-    let n = &ui.navidrome;
+fn subsonic(ui: &Ui, m: &AppModel) -> Page {
+    let n = &ui.subsonic;
     let s = &m.settings;
     let Some((user, host)) = &n.account else {
         return Page::hero(
-            "Sync from Navidrome",
-            "Copy your Navidrome library and playlists to the player over Wi-Fi.",
+            "Sync from Subsonic",
+            "Copy your library and playlists from a Subsonic server, such as Navidrome, over Wi-Fi.",
         )
         .with_rows(vec![row(
             "Sign In",
-            "navidrome_sign_in",
+            "subsonic_sign_in",
             if n.signing_in { "Checking…" } else { "" },
         )
         .with_kind(RowKind::Chevron)]);
     };
     let sync = match n.running {
-        Some((_, 0)) => row("Cancel Sync", "navidrome_cancel", "Listing songs…"),
+        Some((_, 0)) => row("Cancel Sync", "subsonic_cancel", "Listing songs…"),
         Some((done, total)) => row(
             "Cancel Sync",
-            "navidrome_cancel",
+            "subsonic_cancel",
             format!(
                 "{} of {}",
                 crate::screens::count_label(done),
@@ -459,7 +459,7 @@ fn navidrome(ui: &Ui, m: &AppModel) -> Page {
         ),
         None => row(
             "Sync Now",
-            "navidrome_sync",
+            "subsonic_sync",
             match n.last {
                 Some((songs, playlists)) => format!(
                     "{} · {}",
@@ -470,24 +470,23 @@ fn navidrome(ui: &Ui, m: &AppModel) -> Page {
             },
         ),
     };
-    let target = s.navidrome_target.label();
+    let target = s.subsonic_target.label();
     Page::rows(vec![
-        row("Account", "navidrome_account", format!("{user} · {host}")),
+        row("Account", "subsonic_account", format!("{user} · {host}")),
         sync,
-        row("Sync Automatically", "navidrome_auto", "")
-            .with_kind(RowKind::Toggle(s.navidrome_auto)),
+        row("Sync Automatically", "subsonic_auto", "").with_kind(RowKind::Toggle(s.subsonic_auto)),
         row(
             "Store On",
-            "navidrome_target",
+            "subsonic_target",
             if n.target_missing {
                 format!("{target} · Missing")
             } else {
                 target.to_owned()
             },
         ),
-        row("What to Sync", "navidrome_scope", s.navidrome_scope.label()),
-        row("Quality", "navidrome_quality", s.navidrome_quality.label()),
-        row("Disconnect", "navidrome_disconnect", ""),
+        row("What to Sync", "subsonic_scope", s.subsonic_scope.label()),
+        row("Quality", "subsonic_quality", s.subsonic_quality.label()),
+        row("Disconnect", "subsonic_disconnect", ""),
     ])
 }
 
@@ -1512,7 +1511,7 @@ fn storage(ui: &Ui, m: &AppModel) -> Page {
         !m.library.scanning,
     )]);
     page.rows
-        .push(row("Navidrome", "navidrome", navidrome_summary(ui)).with_kind(RowKind::Chevron));
+        .push(row("Subsonic", "subsonic", subsonic_summary(ui)).with_kind(RowKind::Chevron));
     // The computer page opens by itself when a cable is connected; Storage
     // leads back to it only while one is (UI v4: no idle "From a Computer").
     if !usb_summary(m).is_empty() {

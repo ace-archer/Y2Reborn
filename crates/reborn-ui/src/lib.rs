@@ -42,8 +42,8 @@ mod views_settings;
 mod views_system;
 
 use reborn_core::{
-    navidrome::NavidromeRequest,
     platform::{ChargingState, LowBattery, UsbTransfer, WifiProblem},
+    subsonic::SubsonicRequest,
     Action, AppModel, AudioOutput, CodecPreference, ConfirmAction, Modal, NavigationFrame,
     PlatformTask, RadioRequest, RadioScan, RepeatMode, Screen, ShuffleMode, Track, WrapAround,
 };
@@ -282,9 +282,9 @@ pub struct LastFmView {
     pub busy: bool,
 }
 
-/// Settings > Storage > Navidrome as the player knows it.
+/// Settings > Storage > Subsonic as the player knows it.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct NavidromeView {
+pub struct SubsonicView {
     /// The account songs come from: (username, server host).
     pub account: Option<(String, String)>,
     /// The sign-in is being checked with the server.
@@ -396,7 +396,7 @@ pub struct Ui {
     pub bluetooth: BluetoothView,
     pub radio: RadioView,
     pub lastfm: LastFmView,
-    pub navidrome: NavidromeView,
+    pub subsonic: SubsonicView,
     pub pairing: Option<String>,
     pub pairing_focus: usize,
     /// The full-screen keyboard, while it is open.
@@ -2807,20 +2807,20 @@ impl Ui {
                 self.keyboard = Some(keyboard::Keyboard::new(keyboard::Purpose::LastFmUser, ""));
                 Effect::None
             }
-            "navidrome_sign_in" => {
+            "subsonic_sign_in" => {
                 self.keyboard = Some(keyboard::Keyboard::new(
-                    keyboard::Purpose::NavidromeServer,
+                    keyboard::Purpose::SubsonicServer,
                     "https://",
                 ));
                 Effect::None
             }
-            "navidrome_sync" => Effect::Navidrome(NavidromeRequest::SyncNow),
-            "navidrome_cancel" => Effect::Navidrome(NavidromeRequest::Cancel),
-            "navidrome_disconnect" => Effect::Navidrome(NavidromeRequest::Disconnect),
-            "navidrome_auto" => Effect::SetNavidromeAuto(!m.settings.navidrome_auto),
-            "navidrome_target" => Effect::SetNavidromeTarget(m.settings.navidrome_target.next()),
-            "navidrome_scope" => Effect::SetNavidromeScope(m.settings.navidrome_scope.next()),
-            "navidrome_quality" => Effect::SetNavidromeQuality(m.settings.navidrome_quality.next()),
+            "subsonic_sync" => Effect::Subsonic(SubsonicRequest::SyncNow),
+            "subsonic_cancel" => Effect::Subsonic(SubsonicRequest::Cancel),
+            "subsonic_disconnect" => Effect::Subsonic(SubsonicRequest::Disconnect),
+            "subsonic_auto" => Effect::SetSubsonicAuto(!m.settings.subsonic_auto),
+            "subsonic_target" => Effect::SetSubsonicTarget(m.settings.subsonic_target.next()),
+            "subsonic_scope" => Effect::SetSubsonicScope(m.settings.subsonic_scope.next()),
+            "subsonic_quality" => Effect::SetSubsonicQuality(m.settings.subsonic_quality.next()),
             "wrap_around" => Effect::SetWrapAround(m.settings.wrap_around.next()),
             "home_audiobooks" => Effect::SetAudiobooksOnHome(!m.settings.audiobooks_on_home),
             "screen_off_buttons" => {
@@ -3566,24 +3566,24 @@ impl Ui {
                         self.keyboard = None;
                         Effect::LastFm(reborn_core::LastFmRequest::Login { username, password })
                     }
-                    Purpose::NavidromeServer => {
+                    Purpose::SubsonicServer => {
                         if text.is_empty() || text.ends_with("://") {
                             self.flash("Type the server's address");
                             return Effect::None;
                         }
                         self.keyboard = Some(keyboard::Keyboard::new(
-                            Purpose::NavidromeUser { server: text },
+                            Purpose::SubsonicUser { server: text },
                             "",
                         ));
                         Effect::None
                     }
-                    Purpose::NavidromeUser { server } => {
+                    Purpose::SubsonicUser { server } => {
                         if text.is_empty() {
-                            self.flash("Type your Navidrome username");
+                            self.flash("Type your username");
                             return Effect::None;
                         }
                         self.keyboard = Some(keyboard::Keyboard::new(
-                            Purpose::NavidromePassword {
+                            Purpose::SubsonicPassword {
                                 server,
                                 username: text,
                             },
@@ -3591,14 +3591,14 @@ impl Ui {
                         ));
                         Effect::None
                     }
-                    Purpose::NavidromePassword { server, username } => {
+                    Purpose::SubsonicPassword { server, username } => {
                         if k.text.is_empty() {
-                            self.flash("Type your Navidrome password");
+                            self.flash("Type your password");
                             return Effect::None;
                         }
                         let password = std::mem::take(&mut k.text);
                         self.keyboard = None;
-                        Effect::Navidrome(NavidromeRequest::Login {
+                        Effect::Subsonic(SubsonicRequest::Login {
                             server,
                             username,
                             password,
@@ -4111,7 +4111,7 @@ fn route(key: &str) -> Option<Screen> {
         "diagnostics" => Screen::Diagnostics,
         "radio" => Screen::Radio,
         "lastfm" => Screen::LastFm,
-        "navidrome" => Screen::Navidrome,
+        "subsonic" => Screen::Subsonic,
         "error_reports" => Screen::ErrorReports,
         _ => return None,
     })

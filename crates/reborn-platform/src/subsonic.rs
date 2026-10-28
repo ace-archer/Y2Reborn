@@ -1,21 +1,22 @@
-//! Navidrome: songs and playlists copied from a Navidrome (Subsonic API)
-//! server to Internal Storage or the SD card.
+//! Subsonic: songs and playlists copied from a server that speaks the
+//! Subsonic API (Navidrome, Gonic, Airsonic, Ampache and others) to Internal
+//! Storage or the SD card.
 //!
 //! Requests go through `curl` (http or https; a server at home often has no
 //! certificate). The address with its sign-in travels on curl's standard
 //! input as a config line (`-K -`), never on its command line, so no token
 //! shows in the process list. Sign-in is Subsonic's token scheme: the
 //! password is used once to make `md5(password + salt)` and is never stored;
-//! the token and salt live only in `/data/reborn/state/navidrome.json`
+//! the token and salt live only in `/data/reborn/state/subsonic.json`
 //! (0600). Nothing here logs a secret.
 //!
-//! Everything synced lives in one `Navidrome` folder on the chosen storage:
+//! Everything synced lives in one `Subsonic` folder on the chosen storage:
 //! `Artist/Album/NN Title.ext` and `Playlists/<name>.m3u8`, with
 //! `.sync.json` listing what the sync put there. Only files in that list are
 //! ever replaced or removed; the server is the source, so a synced playlist
 //! changed on the player is written over by the next sync.
 use crate::lastfm::{form_encode, hex, md5};
-use reborn_core::navidrome::{SyncQuality, SyncScope};
+use reborn_core::subsonic::{SyncQuality, SyncScope};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -28,15 +29,17 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 /// The folder on the chosen storage that holds everything synced.
-pub const FOLDER: &str = "Navidrome";
+pub const FOLDER: &str = "Subsonic";
 const MANIFEST: &str = ".sync.json";
 const PLAYLISTS: &str = "Playlists";
 /// Free space a sync leaves on the storage.
 pub const RESERVE: u64 = 256 * 1024 * 1024;
-/// Subsonic API version asked for (Navidrome speaks 1.16.1).
-const API_VERSION: &str = "1.16.1";
+/// Subsonic API version asked for: the first with token sign-in, and new
+/// enough for everything used here, so older servers answer it too.
+const API_VERSION: &str = "1.13.0";
 const CLIENT: &str = "Y2Reborn";
-/// Songs per `search3` page (Navidrome's largest).
+/// Songs per `search3` page, albums per `getAlbumList2` page (the
+/// largest the API allows).
 const PAGE: usize = 500;
 /// At most this many songs are listed.
 const MAX_SONGS: usize = 200_000;
@@ -115,7 +118,7 @@ pub fn server_address(text: &str) -> Option<String> {
 }
 
 pub fn account_path(root: &Path) -> PathBuf {
-    root.join("state/navidrome.json")
+    root.join("state/subsonic.json")
 }
 pub fn load_account(path: &Path) -> Option<Account> {
     let a: Account = serde_json::from_slice(&fs::read(path).ok()?).ok()?;
@@ -179,11 +182,11 @@ impl Error {
     /// For the listener, in Reborn's words.
     pub fn message(&self) -> String {
         match self {
-            Self::Offline(_) => "The Navidrome server can't be reached".into(),
-            Self::WrongLogin => "Wrong Navidrome username or password".into(),
+            Self::Offline(_) => "The server can't be reached".into(),
+            Self::WrongLogin => "Wrong username or password".into(),
             Self::TokenRefused => "This server doesn't accept this sign-in".into(),
-            Self::NotSubsonic => "That address isn't a Navidrome server".into(),
-            Self::Refused(code, _) => format!("Navidrome refused the request ({code})"),
+            Self::NotSubsonic => "That address isn't a Subsonic server".into(),
+            Self::Refused(code, _) => format!("The server refused the request ({code})"),
             Self::Storage(_) => "Couldn't write the music to storage".into(),
             Self::Cancelled => "Sync stopped".into(),
         }
@@ -422,8 +425,17 @@ impl Client {
     pub fn ping(&self) -> Result<(), Error> {
         self.call("ping", &[]).map(|_| ())
     }
-    /// Every song, a page at a time (Navidrome lists all for an empty search).
+    /// Every song: an empty search lists them all on most servers
+    /// (Navidrome, Gonic and others), a page at a time; a server that
+    /// refuses it or finds nothing is walked album by album instead.
     pub fn songs(&self, cancel: &AtomicBool) -> Result<Vec<Song>, Error> {
+        match self.searched_songs(cancel) {
+            Ok(songs) if !songs.is_empty() => Ok(songs),
+            Ok(_) | Err(Error::Refused(..)) => self.album_songs(cancel),
+            Err(e) => Err(e),
+        }
+    }
+    fn searched_songs(&self, cancel: &AtomicBool) -> Result<Vec<Song>, Error> {
         let mut songs = vec![];
         loop {
             if cancel.load(Ordering::Relaxed) {
@@ -445,6 +457,41 @@ impl Client {
             let n = page.len();
             songs.extend(page.into_iter().filter_map(Song::of));
             if n < PAGE || songs.len() >= MAX_SONGS {
+                return Ok(songs);
+            }
+        }
+    }
+    fn album_songs(&self, cancel: &AtomicBool) -> Result<Vec<Song>, Error> {
+        let mut songs = vec![];
+        let mut offset = 0;
+        loop {
+            let size = PAGE.to_string();
+            let from = offset.to_string();
+            let v = self.call(
+                "getAlbumList2",
+                &[
+                    ("type", "alphabeticalByName"),
+                    ("size", &size),
+                    ("offset", &from),
+                ],
+            )?;
+            let albums = list(v.get("albumList2").and_then(|l| l.get("album")));
+            offset += albums.len();
+            for album in &albums {
+                if cancel.load(Ordering::Relaxed) {
+                    return Err(Error::Cancelled);
+                }
+                let Some(id) = album.get("id").and_then(Value::as_str) else {
+                    continue;
+                };
+                let full = self.call("getAlbum", &[("id", id)])?;
+                let found = list(full.get("album").and_then(|a| a.get("song")));
+                songs.extend(found.into_iter().filter_map(Song::of));
+                if songs.len() >= MAX_SONGS {
+                    return Ok(songs);
+                }
+            }
+            if albums.len() < PAGE {
                 return Ok(songs);
             }
         }
@@ -573,7 +620,7 @@ pub struct Kept {
     pub quality: SyncQuality,
 }
 
-/// What the sync put in its folder (`Navidrome/.sync.json`). It lives with
+/// What the sync put in its folder (`Subsonic/.sync.json`). It lives with
 /// the music, so another card brings its own.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Manifest {
@@ -635,7 +682,7 @@ pub struct Summary {
     pub full: bool,
 }
 
-/// Bring `root/Navidrome` in line with the server: copy what is missing or
+/// Bring `root/Subsonic` in line with the server: copy what is missing or
 /// changed, remove what the server no longer has (or `scope` no longer
 /// wants), then write the playlists. Each song is written whole or not at
 /// all; an interruption keeps what was copied.
@@ -828,7 +875,7 @@ fn write_playlists(
     for p in playlists {
         let mut name = name_part(&p.name);
         if name.eq_ignore_ascii_case(crate::playlists::FAVORITES) {
-            name = format!("{name} (Navidrome)");
+            name = format!("{name} (Subsonic)");
         }
         if !used.insert(name.to_lowercase()) {
             name = format!("{name} ({})", name_part(&p.id));
@@ -889,7 +936,7 @@ mod tests {
 
     fn dir(name: &str) -> PathBuf {
         let root =
-            std::env::temp_dir().join(format!("reborn-navidrome-{name}-{}", std::process::id()));
+            std::env::temp_dir().join(format!("reborn-subsonic-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
         root
@@ -995,7 +1042,7 @@ mod tests {
         assert_eq!(b, "Bauhaus/Mask/01 SAME (bbbb2222).flac");
     }
 
-    /// A stand-in Navidrome behind a stand-in curl: answers by endpoint,
+    /// A stand-in Subsonic server behind a stand-in curl: answers by endpoint,
     /// records every config it was sent and every command line.
     fn fake_server(root: &Path, songs: &[Song], playlist: &[&str]) -> Client {
         let entry = |s: &Song| {
@@ -1021,6 +1068,16 @@ mod tests {
                 "songs.json",
                 ok(
                     serde_json::json!({"searchResult3": {"song": songs.iter().map(entry).collect::<Vec<_>>()}}),
+                ),
+            ),
+            (
+                "albums.json",
+                ok(serde_json::json!({"albumList2": {"album": [{"id": "al1"}]}})),
+            ),
+            (
+                "album.json",
+                ok(
+                    serde_json::json!({"album": {"id": "al1", "song": songs.iter().map(entry).collect::<Vec<_>>()}}),
                 ),
             ),
             (
@@ -1050,6 +1107,9 @@ mod tests {
                  *rest/getPlaylist\\?*) cat {r}/playlist.json ;;\n\
                  *rest/search3*songOffset=0*) cat {r}/songs.json ;;\n\
                  *rest/search3*) echo '{{\"subsonic-response\":{{\"status\":\"ok\"}}}}' ;;\n\
+                 *rest/getAlbumList2*offset=0*) cat {r}/albums.json ;;\n\
+                 *rest/getAlbumList2*) echo '{{\"subsonic-response\":{{\"status\":\"ok\"}}}}' ;;\n\
+                 *rest/getAlbum\\?*) cat {r}/album.json ;;\n\
                  *id=down*) exit 7 ;;\n\
                  *id=bad*) echo '{{\"subsonic-response\":{{\"status\":\"failed\",\"error\":{{\"code\":70,\"message\":\"not found\"}}}}}}' > \"$out\" ;;\n\
                  *rest/download*|*rest/stream*) printf 'audio %s' \"$cfg\" > \"$out\" ;;\n\
@@ -1122,7 +1182,7 @@ mod tests {
         );
         // A server playlist named Favorites is not taken for the player's own.
         assert!(sync_dir
-            .join("Playlists/favorites (Navidrome).m3u8")
+            .join("Playlists/favorites (Subsonic).m3u8")
             .is_file());
         assert!(!sync_dir.join("Playlists/favorites.m3u8").exists());
         // No secret on any command line; the token goes on stdin.
@@ -1258,6 +1318,28 @@ mod tests {
             .join("Bauhaus/Mask/.01 Two.flac.part")
             .exists());
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_server_without_an_empty_search_is_listed_album_by_album() {
+        let root = dir("albums");
+        let songs = [song("aaaa", "One", 1), song("bbbb", "Two", 2)];
+        let client = fake_server(&root, &songs, &[]);
+        let never = AtomicBool::new(false);
+        let ids = |listed: Vec<Song>| listed.into_iter().map(|s| s.id).collect::<Vec<_>>();
+        assert_eq!(ids(client.songs(&never).unwrap()), ["aaaa", "bbbb"]);
+        // Refused (Airsonic wants a query) or nothing found: the albums.
+        for answer in [
+            r#"{"subsonic-response":{"status":"failed","error":{"code":10,"message":"query"}}}"#,
+            r#"{"subsonic-response":{"status":"ok","searchResult3":{}}}"#,
+        ] {
+            fs::write(root.join("songs.json"), answer).unwrap();
+            assert_eq!(ids(client.songs(&never).unwrap()), ["aaaa", "bbbb"]);
+        }
+        let asked = fs::read_to_string(root.join("requests")).unwrap();
+        assert!(asked.contains("getAlbumList2?") && asked.contains("type=alphabeticalByName"));
+        assert!(asked.contains("getAlbum?") && asked.contains("id=al1"));
+        fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

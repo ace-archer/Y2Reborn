@@ -11,12 +11,12 @@ pub mod jack;
 pub mod kernel_events;
 pub mod lastfm;
 mod native;
-pub mod navidrome;
 pub mod playlists;
 pub mod power;
 pub mod radio;
 pub mod scrobble;
 pub mod storage;
+pub mod subsonic;
 pub mod wifi;
 pub mod workload;
 
