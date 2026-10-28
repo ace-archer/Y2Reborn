@@ -13,6 +13,7 @@ use reborn_core::platform::{SdCard, UsbTransfer};
 use reborn_core::{Event, MediaSource};
 use reborn_observability::Level;
 use reborn_platform::navidrome as nd;
+use reborn_ui::WifiStatus;
 use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -103,6 +104,14 @@ impl Runtime {
             }
         }
     }
+    /// On a network: a server at home answers without the internet, so
+    /// "No Internet" counts too (as for radio), unlike Last.fm.
+    fn navidrome_online(&self) -> bool {
+        matches!(
+            self.ui.wifi.status,
+            WifiStatus::Connected(_) | WifiStatus::NoInternet(_)
+        )
+    }
     /// A computer has the drives open: nothing may write to them.
     fn navidrome_usb_busy(&self) -> bool {
         matches!(
@@ -164,7 +173,9 @@ impl Runtime {
     /// Settings > Storage > Navidrome.
     pub(crate) fn navidrome_request(&mut self, request: NavidromeRequest) -> Result<(), String> {
         let result = match request {
-            NavidromeRequest::Login { .. } | NavidromeRequest::SyncNow if !self.online() => {
+            NavidromeRequest::Login { .. } | NavidromeRequest::SyncNow
+                if !self.navidrome_online() =>
+            {
                 Err("Connect to Wi-Fi first".to_owned())
             }
             NavidromeRequest::Login { .. } if self.navidrome.signing_in => Ok(()),
@@ -337,7 +348,7 @@ impl Runtime {
             || self.navidrome.signing_in
             || now < self.navidrome.next_auto
             || self.sleep_prepared
-            || !self.online()
+            || !self.navidrome_online()
         {
             return;
         }

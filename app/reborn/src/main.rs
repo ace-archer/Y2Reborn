@@ -2578,7 +2578,13 @@ impl Runtime {
                 self.model.settings.lastfm_now_playing = on;
                 self.checkpoint();
             }
-            Effect::Navidrome(request) => self.navidrome_request(request)?,
+            // A refusal is the page's answer in the listener's words ("Connect
+            // to Wi-Fi first"), not a failure for `friendly_error` to replace.
+            Effect::Navidrome(request) => {
+                if let Err(said) = self.navidrome_request(request) {
+                    self.ui.flash(said);
+                }
+            }
             Effect::SetNavidromeAuto(on) => {
                 self.model.settings.navidrome_auto = on;
                 self.checkpoint();

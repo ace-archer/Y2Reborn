@@ -113,7 +113,7 @@ fn announce_due(
 }
 
 impl Runtime {
-    pub(crate) fn online(&self) -> bool {
+    fn online(&self) -> bool {
         matches!(self.ui.wifi.status, WifiStatus::Connected(_))
     }
     /// What Settings > Last.fm shows.
