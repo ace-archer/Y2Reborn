@@ -1,4 +1,4 @@
-//! Subsonic sync (Settings > Storage > Subsonic): the choices it keeps and
+//! Music server sync (Settings > Storage > Music Server): the choices it keeps and
 //! the requests its page sends. The server is the source: songs and
 //! playlists are copied to the player, never the other way.
 use serde::{Deserialize, Serialize};
@@ -85,10 +85,10 @@ impl SyncQuality {
     }
 }
 
-/// Settings > Storage > Subsonic requests. A password lives only in
+/// Settings > Storage > Music Server requests. A password lives only in
 /// `Login` on its way to the one sign-in check and is never printed.
 #[derive(Clone, PartialEq, Eq)]
-pub enum SubsonicRequest {
+pub enum MusicServerRequest {
     Login {
         server: String,
         username: String,
@@ -98,7 +98,7 @@ pub enum SubsonicRequest {
     Cancel,
     Disconnect,
 }
-impl std::fmt::Debug for SubsonicRequest {
+impl std::fmt::Debug for MusicServerRequest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Login { server, .. } => write!(f, "Login {{ server: {server:?}, .. }}"),
@@ -123,7 +123,7 @@ mod tests {
         }
         assert_eq!(q, SyncQuality::Original);
         assert_eq!(SyncQuality::Mp3Medium.mp3_kbps(), Some(192));
-        let login = SubsonicRequest::Login {
+        let login = MusicServerRequest::Login {
             server: "https://music.example".into(),
             username: "luca".into(),
             password: "hunter2".into(),

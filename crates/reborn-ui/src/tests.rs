@@ -4362,14 +4362,17 @@ fn lastfm_password_sign_in_never_shows_or_prints_the_password() {
 }
 
 #[test]
-fn subsonic_sign_in_types_server_user_and_a_hidden_password() {
-    use reborn_core::subsonic::SubsonicRequest;
+fn music_server_sign_in_types_server_user_and_a_hidden_password() {
+    use reborn_core::music_server::MusicServerRequest;
     let mut ui = radios();
-    let mut m = app(Screen::Subsonic);
+    let mut m = app(Screen::MusicServer);
     let page = crate::pages::page(&ui, &m, &[]);
-    assert_eq!(page.hero.expect("signed out").title, "Sync from Subsonic");
     assert_eq!(
-        select_key(&mut ui, &mut m, "subsonic_sign_in"),
+        page.hero.expect("signed out").title,
+        "Sync from a Music Server"
+    );
+    assert_eq!(
+        select_key(&mut ui, &mut m, "music_server_sign_in"),
         Effect::None
     );
     // The address starts with https:// typed; an untouched one is refused.
@@ -4377,7 +4380,7 @@ fn subsonic_sign_in_types_server_user_and_a_hidden_password() {
     assert_eq!(ui.model_action(&mut m, Action::ContextMenu), Effect::None);
     assert!(matches!(
         ui.keyboard.as_ref().map(|k| &k.purpose),
-        Some(crate::keyboard::Purpose::SubsonicServer)
+        Some(crate::keyboard::Purpose::MusicServerAddress)
     ));
     ui.keyboard.as_mut().unwrap().text = "https://music.example.com".into();
     assert_eq!(ui.model_action(&mut m, Action::ContextMenu), Effect::None);
@@ -4385,7 +4388,7 @@ fn subsonic_sign_in_types_server_user_and_a_hidden_password() {
     assert_eq!(ui.model_action(&mut m, Action::ContextMenu), Effect::None);
     assert!(matches!(
         ui.keyboard.as_ref().map(|k| &k.purpose),
-        Some(crate::keyboard::Purpose::SubsonicPassword { .. })
+        Some(crate::keyboard::Purpose::MusicServerPassword { .. })
     ));
     ui.keyboard.as_mut().unwrap().text = "hunter22".into();
     let draw = ui.draw(&m, &m.library.tracks, false);
@@ -4393,7 +4396,7 @@ fn subsonic_sign_in_types_server_user_and_a_hidden_password() {
     let effect = ui.model_action(&mut m, Action::ContextMenu);
     assert_eq!(
         effect,
-        Effect::Subsonic(SubsonicRequest::Login {
+        Effect::MusicServer(MusicServerRequest::Login {
             server: "https://music.example.com".into(),
             username: "luca".into(),
             password: "hunter22".into()
@@ -4404,83 +4407,83 @@ fn subsonic_sign_in_types_server_user_and_a_hidden_password() {
 }
 
 #[test]
-fn subsonic_page_syncs_and_steps_its_choices() {
-    use crate::SubsonicView;
-    use reborn_core::subsonic::{SubsonicRequest, SyncQuality, SyncScope, SyncTarget};
+fn music_server_page_syncs_and_steps_its_choices() {
+    use crate::MusicServerView;
+    use reborn_core::music_server::{MusicServerRequest, SyncQuality, SyncScope, SyncTarget};
     let mut ui = radios();
     let mut m = app(Screen::Storage);
-    let subsonic_row = |ui: &Ui, m: &AppModel| {
+    let music_server_row = |ui: &Ui, m: &AppModel| {
         ui.rows(m, &[])
             .into_iter()
-            .find(|r| r.key == "subsonic")
-            .expect("Storage leads to Subsonic")
+            .find(|r| r.key == "music_server")
+            .expect("Storage leads to Music Server")
     };
-    assert_eq!(subsonic_row(&ui, &m).secondary, "Off");
-    ui.subsonic = SubsonicView {
+    assert_eq!(music_server_row(&ui, &m).secondary, "Off");
+    ui.music_server = MusicServerView {
         account: Some(("luca".into(), "music.example.com".into())),
         last: Some((1204, 1)),
         ..Default::default()
     };
-    assert_eq!(subsonic_row(&ui, &m).secondary, "luca");
-    assert_eq!(select_key(&mut ui, &mut m, "subsonic"), Effect::None);
-    assert_eq!(m.screen, Screen::Subsonic);
+    assert_eq!(music_server_row(&ui, &m).secondary, "luca");
+    assert_eq!(select_key(&mut ui, &mut m, "music_server"), Effect::None);
+    assert_eq!(m.screen, Screen::MusicServer);
     let rows = ui.rows(&m, &[]);
     let keys: Vec<_> = rows.iter().map(|r| r.key.as_str()).collect();
     assert_eq!(
         keys,
         [
-            "subsonic_account",
-            "subsonic_sync",
-            "subsonic_auto",
-            "subsonic_target",
-            "subsonic_scope",
-            "subsonic_quality",
-            "subsonic_disconnect"
+            "music_server_account",
+            "music_server_sync",
+            "music_server_auto",
+            "music_server_target",
+            "music_server_scope",
+            "music_server_quality",
+            "music_server_disconnect"
         ]
     );
     assert_eq!(rows[0].secondary, "luca · music.example.com");
     assert_eq!(rows[1].secondary, "1\u{a0}204 songs · 1 playlist");
     assert_eq!(rows[3].secondary, "Internal Storage");
     assert_eq!(
-        select_key(&mut ui, &mut m, "subsonic_sync"),
-        Effect::Subsonic(SubsonicRequest::SyncNow)
+        select_key(&mut ui, &mut m, "music_server_sync"),
+        Effect::MusicServer(MusicServerRequest::SyncNow)
     );
     assert_eq!(
-        select_key(&mut ui, &mut m, "subsonic_auto"),
-        Effect::SetSubsonicAuto(true)
+        select_key(&mut ui, &mut m, "music_server_auto"),
+        Effect::SetMusicServerAuto(true)
     );
     assert_eq!(
-        select_key(&mut ui, &mut m, "subsonic_target"),
-        Effect::SetSubsonicTarget(SyncTarget::SdCard)
+        select_key(&mut ui, &mut m, "music_server_target"),
+        Effect::SetMusicServerTarget(SyncTarget::SdCard)
     );
     assert_eq!(
-        select_key(&mut ui, &mut m, "subsonic_scope"),
-        Effect::SetSubsonicScope(SyncScope::Playlists)
+        select_key(&mut ui, &mut m, "music_server_scope"),
+        Effect::SetMusicServerScope(SyncScope::Playlists)
     );
     assert_eq!(
-        select_key(&mut ui, &mut m, "subsonic_quality"),
-        Effect::SetSubsonicQuality(SyncQuality::Mp3High)
+        select_key(&mut ui, &mut m, "music_server_quality"),
+        Effect::SetMusicServerQuality(SyncQuality::Mp3High)
     );
     // A card chosen but not in; a sync running offers Cancel with progress.
-    m.settings.subsonic_target = SyncTarget::SdCard;
-    ui.subsonic.target_missing = true;
-    ui.subsonic.running = Some((12, 300));
+    m.settings.music_server_target = SyncTarget::SdCard;
+    ui.music_server.target_missing = true;
+    ui.music_server.running = Some((12, 300));
     let rows = ui.rows(&m, &[]);
     assert_eq!(rows[3].secondary, "SD Card · Missing");
     assert_eq!(
         (rows[1].key.as_str(), rows[1].secondary.as_str()),
-        ("subsonic_cancel", "12 of 300")
+        ("music_server_cancel", "12 of 300")
     );
     assert_eq!(
-        select_key(&mut ui, &mut m, "subsonic_cancel"),
-        Effect::Subsonic(SubsonicRequest::Cancel)
+        select_key(&mut ui, &mut m, "music_server_cancel"),
+        Effect::MusicServer(MusicServerRequest::Cancel)
     );
     assert_eq!(
-        select_key(&mut ui, &mut m, "subsonic_disconnect"),
-        Effect::Subsonic(SubsonicRequest::Disconnect)
+        select_key(&mut ui, &mut m, "music_server_disconnect"),
+        Effect::MusicServer(MusicServerRequest::Disconnect)
     );
     m.screen = Screen::Storage;
-    assert_eq!(subsonic_row(&ui, &m).secondary, "Syncing 12 of 300");
+    assert_eq!(music_server_row(&ui, &m).secondary, "Syncing 12 of 300");
 }
 
 #[test]

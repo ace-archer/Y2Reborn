@@ -1,5 +1,5 @@
-//! Subsonic sync on the player: the sign-in check, the sync worker and the
-//! automatic daily sync (`reborn_platform::subsonic` does the copying).
+//! Music server sync on the player: the sign-in check, the sync worker and the
+//! automatic daily sync (`reborn_platform::music_server` does the copying).
 //!
 //! One sync runs at a time, in its own thread at a lower priority, and
 //! answers on a channel; the main loop never waits for it. While it runs the
@@ -8,11 +8,11 @@
 //! the chosen storage goes away, and the library is scanned once it changed
 //! anything. No secret is ever logged.
 use crate::Runtime;
+use reborn_core::music_server::{MusicServerRequest, SyncTarget};
 use reborn_core::platform::{SdCard, UsbTransfer};
-use reborn_core::subsonic::{SubsonicRequest, SyncTarget};
 use reborn_core::{Event, MediaSource};
 use reborn_observability::Level;
-use reborn_platform::subsonic as api;
+use reborn_platform::music_server as api;
 use reborn_ui::WifiStatus;
 use serde_json::json;
 use std::path::{Path, PathBuf};
@@ -42,7 +42,7 @@ struct Running {
     on_card: bool,
 }
 
-pub struct Subsonic {
+pub struct MusicServer {
     account: Option<api::Account>,
     account_path: PathBuf,
     signing_in: bool,
@@ -57,7 +57,7 @@ pub struct Subsonic {
     next_auto: Instant,
     replies: (Sender<Reply>, Receiver<Reply>),
 }
-impl Subsonic {
+impl MusicServer {
     pub fn load(root: &Path) -> Self {
         let account_path = api::account_path(root);
         Self {
@@ -83,8 +83,8 @@ impl Subsonic {
 impl Runtime {
     /// Where synced music goes now: Internal Storage, or the SD card while
     /// one is in and writable.
-    fn subsonic_root(&self) -> Option<PathBuf> {
-        match self.model.settings.subsonic_target {
+    fn music_server_root(&self) -> Option<PathBuf> {
+        match self.model.settings.music_server_target {
             SyncTarget::Internal => Some(self.model.settings.music_directory.clone()),
             SyncTarget::SdCard => {
                 let writable = !matches!(
@@ -106,14 +106,14 @@ impl Runtime {
     }
     /// On a network: a server at home answers without the internet, so
     /// "No Internet" counts too (as for radio), unlike Last.fm.
-    fn subsonic_online(&self) -> bool {
+    fn music_server_online(&self) -> bool {
         matches!(
             self.ui.wifi.status,
             WifiStatus::Connected(_) | WifiStatus::NoInternet(_)
         )
     }
     /// A computer has the drives open: nothing may write to them.
-    fn subsonic_usb_busy(&self) -> bool {
+    fn music_server_usb_busy(&self) -> bool {
         matches!(
             self.model.platform.snapshot.usb,
             UsbTransfer::Ready | UsbTransfer::Copying | UsbTransfer::Starting
@@ -121,27 +121,27 @@ impl Runtime {
     }
     /// What the chosen storage's last sync left, read again when the storage
     /// changed (another choice, a card inserted).
-    fn subsonic_known(&mut self) {
-        let root = self.subsonic_root();
-        if root == self.subsonic.known_root {
+    fn music_server_known(&mut self) {
+        let root = self.music_server_root();
+        if root == self.music_server.known_root {
             return;
         }
         let manifest = root.as_deref().map(api::load_manifest).unwrap_or_default();
         let same = self
-            .subsonic
+            .music_server
             .account
             .as_ref()
             .is_some_and(|a| a.server == manifest.server && a.username == manifest.username);
-        self.subsonic.synced_at = if same { manifest.synced_at } else { 0 };
-        self.subsonic.last = (same && manifest.synced_at > 0)
+        self.music_server.synced_at = if same { manifest.synced_at } else { 0 };
+        self.music_server.last = (same && manifest.synced_at > 0)
             .then_some((manifest.songs.len(), manifest.playlists.len()));
-        self.subsonic.known_root = root;
+        self.music_server.known_root = root;
     }
-    /// What Settings > Storage > Subsonic shows.
-    pub(crate) fn subsonic_view(&mut self) {
-        self.subsonic_known();
-        let n = &self.subsonic;
-        let view = reborn_ui::SubsonicView {
+    /// What Settings > Storage > Music Server shows.
+    pub(crate) fn music_server_view(&mut self) {
+        self.music_server_known();
+        let n = &self.music_server;
+        let view = reborn_ui::MusicServerView {
             account: n
                 .account
                 .as_ref()
@@ -154,26 +154,35 @@ impl Runtime {
             last: n.last,
             target_missing: n.known_root.is_none(),
         };
-        if view != self.ui.subsonic {
-            self.ui.subsonic = view;
+        if view != self.ui.music_server {
+            self.ui.music_server = view;
             self.dirty.mark_render();
         }
     }
-    fn subsonic_spawn(&self, name: &str, job: impl FnOnce(Sender<Reply>) + Send + 'static) -> bool {
-        let reply = self.subsonic.replies.0.clone();
+    fn music_server_spawn(
+        &self,
+        name: &str,
+        job: impl FnOnce(Sender<Reply>) + Send + 'static,
+    ) -> bool {
+        let reply = self.music_server.replies.0.clone();
         std::thread::Builder::new()
             .name(name.into())
             .spawn(move || job(reply))
             .is_ok()
     }
-    /// Settings > Storage > Subsonic.
-    pub(crate) fn subsonic_request(&mut self, request: SubsonicRequest) -> Result<(), String> {
+    /// Settings > Storage > Music Server.
+    pub(crate) fn music_server_request(
+        &mut self,
+        request: MusicServerRequest,
+    ) -> Result<(), String> {
         let result = match request {
-            SubsonicRequest::Login { .. } | SubsonicRequest::SyncNow if !self.subsonic_online() => {
+            MusicServerRequest::Login { .. } | MusicServerRequest::SyncNow
+                if !self.music_server_online() =>
+            {
                 Err("Connect to Wi-Fi first".to_owned())
             }
-            SubsonicRequest::Login { .. } if self.subsonic.signing_in => Ok(()),
-            SubsonicRequest::Login {
+            MusicServerRequest::Login { .. } if self.music_server.signing_in => Ok(()),
+            MusicServerRequest::Login {
                 server,
                 username,
                 password,
@@ -184,82 +193,82 @@ impl Runtime {
                     Err("The clock isn't set yet; try again in a moment".to_owned())
                 }
                 Some(server) => {
-                    let account = api::Account::new(server, username, &password);
-                    self.subsonic.signing_in = self.subsonic_spawn("subsonic-login", move |tx| {
-                        let checked = api::Client::new(account.clone()).ping().map(|_| account);
-                        let _ = tx.send(Reply::SignedIn(checked));
-                    });
+                    self.music_server.signing_in =
+                        self.music_server_spawn("server-login", move |tx| {
+                            let signed_in = api::sign_in(server, username, &password);
+                            let _ = tx.send(Reply::SignedIn(signed_in));
+                        });
                     Ok(())
                 }
             },
-            SubsonicRequest::SyncNow => self.subsonic_start(false),
-            SubsonicRequest::Cancel => {
-                if let Some(r) = &self.subsonic.running {
+            MusicServerRequest::SyncNow => self.music_server_start(false),
+            MusicServerRequest::Cancel => {
+                if let Some(r) = &self.music_server.running {
                     r.cancel.store(true, Ordering::Relaxed);
                 }
                 Ok(())
             }
-            SubsonicRequest::Disconnect => {
-                self.subsonic_forget();
+            MusicServerRequest::Disconnect => {
+                self.music_server_forget();
                 self.ui.flash("Disconnected from the server");
                 Ok(())
             }
         };
-        self.subsonic_view();
+        self.music_server_view();
         result
     }
     /// Forget the account (a running sync stops). Synced music stays: it is
     /// the listener's music now, removable like any other.
-    pub(crate) fn subsonic_forget(&mut self) {
-        if let Some(r) = &self.subsonic.running {
+    pub(crate) fn music_server_forget(&mut self) {
+        if let Some(r) = &self.music_server.running {
             r.cancel.store(true, Ordering::Relaxed);
         }
-        if let Err(e) = api::forget_account(&self.subsonic.account_path) {
+        if let Err(e) = api::forget_account(&self.music_server.account_path) {
             self.log.emit(
                 Level::Warn,
-                "subsonic",
+                "music_server",
                 "forget_failed",
-                "Subsonic sign-in not removed",
+                "Music server sign-in not removed",
                 None,
                 json!({"error": e.to_string()}),
             );
         }
-        self.subsonic.account = None;
-        self.subsonic.known_root = None;
-        self.subsonic_view();
+        self.music_server.account = None;
+        self.music_server.known_root = None;
+        self.music_server_view();
     }
-    fn subsonic_start(&mut self, automatic: bool) -> Result<(), String> {
-        if self.subsonic.running.is_some() {
+    fn music_server_start(&mut self, automatic: bool) -> Result<(), String> {
+        if self.music_server.running.is_some() {
             return Ok(());
         }
         let account = self
-            .subsonic
+            .music_server
             .account
             .clone()
             .ok_or("Sign in to a server first")?;
-        if self.subsonic_usb_busy() {
+        if self.music_server_usb_busy() {
             return Err("Unplug from the computer first".into());
         }
-        let root = self
-            .subsonic_root()
-            .ok_or(match self.model.settings.subsonic_target {
-                SyncTarget::SdCard => "Insert a working SD card first",
-                SyncTarget::Internal => "Internal Storage isn't ready",
-            })?;
+        let root =
+            self.music_server_root()
+                .ok_or(match self.model.settings.music_server_target {
+                    SyncTarget::SdCard => "Insert a working SD card first",
+                    SyncTarget::Internal => "Internal Storage isn't ready",
+                })?;
         let now_unix = self.trusted_unix();
         if account.server.starts_with("https") && now_unix.is_none() {
             return Err("The clock isn't set yet; try again in a moment".into());
         }
         let options = api::Options {
-            scope: self.model.settings.subsonic_scope,
-            quality: self.model.settings.subsonic_quality,
+            scope: self.model.settings.music_server_scope,
+            quality: self.model.settings.music_server_quality,
             now_unix: now_unix.unwrap_or(0),
             reserve: api::RESERVE,
         };
-        let on_card = self.model.settings.subsonic_target == SyncTarget::SdCard;
+        let on_card = self.model.settings.music_server_target == SyncTarget::SdCard;
         let cancel = Arc::new(AtomicBool::new(false));
         let stop = cancel.clone();
-        let started = self.subsonic_spawn("subsonic-sync", move |tx| {
+        let started = self.music_server_spawn("server-sync", move |tx| {
             reborn_platform::lower_thread_priority();
             // The card is read-only between writes (Y2Linux 8.27): the whole
             // sync runs inside Reborn's write window, kept open as it goes.
@@ -287,47 +296,47 @@ impl Runtime {
         if !started {
             return Err("Couldn't start the sync".into());
         }
-        self.subsonic.running = Some(Running {
+        self.music_server.running = Some(Running {
             cancel,
             progress: api::Progress::default(),
             on_card,
         });
         self.log.emit(
             Level::Info,
-            "subsonic",
+            "music_server",
             "sync_started",
-            "Subsonic sync started",
+            "Music server sync started",
             None,
             json!({
                 "automatic": automatic,
-                "target": self.model.settings.subsonic_target,
-                "scope": self.model.settings.subsonic_scope,
-                "quality": self.model.settings.subsonic_quality,
+                "target": self.model.settings.music_server_target,
+                "scope": self.model.settings.music_server_scope,
+                "quality": self.model.settings.music_server_quality,
             }),
         );
         Ok(())
     }
     /// Replies, stopping a sync that may no longer write, the scan after it,
     /// and the automatic sync.
-    pub(crate) fn subsonic_tick(&mut self) {
-        let replies: Vec<Reply> = self.subsonic.replies.1.try_iter().collect();
+    pub(crate) fn music_server_tick(&mut self) {
+        let replies: Vec<Reply> = self.music_server.replies.1.try_iter().collect();
         for reply in replies {
-            self.subsonic_reply(reply);
+            self.music_server_reply(reply);
         }
-        if let Some(r) = &self.subsonic.running {
+        if let Some(r) = &self.music_server.running {
             // (Checked in place: this runs every frame while syncing.)
-            let card_gone = self.model.settings.subsonic_target == SyncTarget::SdCard
+            let card_gone = self.model.settings.music_server_target == SyncTarget::SdCard
                 && !self
                     .model
                     .sources
                     .iter()
                     .any(|s| s.online && matches!(s.kind, MediaSource::SdCard(_)));
-            if card_gone || self.subsonic_usb_busy() {
+            if card_gone || self.music_server_usb_busy() {
                 r.cancel.store(true, Ordering::Relaxed);
             }
         }
-        if self.subsonic.scan_wanted && !self.model.library.scanning {
-            self.subsonic.scan_wanted = false;
+        if self.music_server.scan_wanted && !self.model.library.scanning {
+            self.music_server.scan_wanted = false;
             self.model.apply(Event::LibraryScanStarted);
             if let Err(error) = self.scanner.scan(self.model.sources.clone()) {
                 self.model.apply(Event::LibraryScanFailed(error));
@@ -335,76 +344,80 @@ impl Runtime {
             self.dirty.mark_render();
         }
         let now = Instant::now();
-        if !self.model.settings.subsonic_auto
-            || self.subsonic.account.is_none()
-            || self.subsonic.running.is_some()
-            || self.subsonic.signing_in
-            || now < self.subsonic.next_auto
+        if !self.model.settings.music_server_auto
+            || self.music_server.account.is_none()
+            || self.music_server.running.is_some()
+            || self.music_server.signing_in
+            || now < self.music_server.next_auto
             || self.sleep_prepared
-            || !self.subsonic_online()
+            || !self.music_server_online()
         {
             return;
         }
-        self.subsonic.next_auto = now + AUTO_RETRY;
+        self.music_server.next_auto = now + AUTO_RETRY;
         // Once a day by the wall clock, so a trusted one is needed.
         let Some(now_unix) = self.trusted_unix() else {
             return;
         };
-        self.subsonic_view();
-        if now_unix - self.subsonic.synced_at < AUTO_EVERY_S {
+        self.music_server_view();
+        if now_unix - self.music_server.synced_at < AUTO_EVERY_S {
             return;
         }
-        if let Err(reason) = self.subsonic_start(true) {
+        if let Err(reason) = self.music_server_start(true) {
             self.log.emit(
                 Level::Info,
-                "subsonic",
+                "music_server",
                 "auto_skipped",
-                "Automatic Subsonic sync not started",
+                "Automatic music server sync not started",
                 None,
                 json!({"reason": reason}),
             );
         }
-        self.subsonic_view();
+        self.music_server_view();
     }
-    fn subsonic_reply(&mut self, reply: Reply) {
+    fn music_server_reply(&mut self, reply: Reply) {
         match reply {
             Reply::SignedIn(result) => {
-                self.subsonic.signing_in = false;
+                self.music_server.signing_in = false;
                 match result {
                     Ok(account) => {
-                        if let Err(e) = api::save_account(&self.subsonic.account_path, &account) {
+                        if let Err(e) = api::save_account(&self.music_server.account_path, &account)
+                        {
                             self.ui.flash(format!("Couldn't save the sign-in: {e}"));
                         } else {
                             self.ui.flash(format!("Signed in as {}", account.username));
                             self.log.emit(
                                 Level::Info,
-                                "subsonic",
+                                "music_server",
                                 "connected",
-                                "Subsonic connected",
+                                "Music server connected",
                                 None,
-                                json!({"https": account.server.starts_with("https")}),
+                                json!({
+                                    "https": account.server.starts_with("https"),
+                                    "kind": account.kind(),
+                                }),
                             );
-                            self.subsonic.account = Some(account);
-                            self.subsonic.known_root = None;
+                            self.music_server.account = Some(account);
+                            self.music_server.known_root = None;
                         }
                     }
                     Err(e) => self.ui.flash(e.message()),
                 }
             }
             Reply::Progress(p) => {
-                if let Some(r) = &mut self.subsonic.running {
+                if let Some(r) = &mut self.music_server.running {
                     r.progress = p;
                 }
             }
             Reply::Done(result, automatic) => {
-                let on_card = self.subsonic.running.take().is_some_and(|r| r.on_card);
+                let on_card = self.music_server.running.take().is_some_and(|r| r.on_card);
                 match result {
                     Ok(s) => {
                         self.log.emit(
                             Level::Info,
-                            "subsonic",
+                            "music_server",
                             "synced",
-                            "Subsonic sync finished",
+                            "Music server sync finished",
                             None,
                             json!({
                                 "automatic": automatic,
@@ -416,9 +429,9 @@ impl Runtime {
                                 "full": s.full,
                             }),
                         );
-                        self.subsonic.known_root = None;
+                        self.music_server.known_root = None;
                         if s.downloaded > 0 || s.removed > 0 || s.playlists > 0 {
-                            self.subsonic.scan_wanted = true;
+                            self.music_server.scan_wanted = true;
                         }
                         let said = if s.full {
                             Some("Storage is full; some songs were left out".to_owned())
@@ -444,18 +457,18 @@ impl Runtime {
                     }
                     Err(api::Error::WrongLogin) => {
                         // The password changed on the server: sign in again.
-                        self.subsonic_forget();
+                        self.music_server_forget();
                         self.ui.flash("Sign in to the server again");
                     }
                     Err(e) => {
                         // Partly copied: what is there now is scanned too.
-                        self.subsonic.scan_wanted = true;
-                        self.subsonic.known_root = None;
+                        self.music_server.scan_wanted = true;
+                        self.music_server.known_root = None;
                         self.log.emit(
                             Level::Warn,
-                            "subsonic",
+                            "music_server",
                             "sync_failed",
-                            "Subsonic sync stopped",
+                            "Music server sync stopped",
                             None,
                             json!({
                                 "automatic": automatic,
@@ -466,7 +479,7 @@ impl Runtime {
                         );
                         // Disconnect stopped it and said so already.
                         let disconnected =
-                            e == api::Error::Cancelled && self.subsonic.account.is_none();
+                            e == api::Error::Cancelled && self.music_server.account.is_none();
                         if !(automatic && e.retry_later()) && !disconnected {
                             self.ui.flash(match e {
                                 // As for playlists: a card with errors, or one
@@ -481,6 +494,6 @@ impl Runtime {
                 }
             }
         }
-        self.subsonic_view();
+        self.music_server_view();
     }
 }

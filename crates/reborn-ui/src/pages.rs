@@ -192,7 +192,7 @@ pub fn page(ui: &Ui, m: &AppModel, tracks: &[Track]) -> Page {
         Screen::PcTransfer => pc_transfer(m),
         Screen::SettingsAudio => sound(ui, m),
         Screen::LastFm => lastfm(ui, m),
-        Screen::Subsonic => subsonic(ui, m),
+        Screen::MusicServer => music_server(ui, m),
         Screen::Equalizer => equalizer(ui, m),
         Screen::Crossfade => crossfade(m),
         Screen::Balance => balance(m),
@@ -414,9 +414,9 @@ fn lastfm(ui: &Ui, m: &AppModel) -> Page {
     ])
 }
 
-/// What Settings > Storage says about Subsonic sync.
-fn subsonic_summary(ui: &Ui) -> String {
-    let n = &ui.subsonic;
+/// What Settings > Storage says about music server sync.
+fn music_server_summary(ui: &Ui) -> String {
+    let n = &ui.music_server;
     match (&n.account, n.running) {
         (None, _) => "Off".into(),
         (Some(_), Some((done, total))) if total > 0 => format!(
@@ -429,28 +429,28 @@ fn subsonic_summary(ui: &Ui) -> String {
     }
 }
 
-/// Settings > Storage > Subsonic: sign-in, then Sync Now (Cancel while it
+/// Settings > Storage > Music Server: sign-in, then Sync Now (Cancel while it
 /// runs), the automatic sync and where and what it copies.
-fn subsonic(ui: &Ui, m: &AppModel) -> Page {
-    let n = &ui.subsonic;
+fn music_server(ui: &Ui, m: &AppModel) -> Page {
+    let n = &ui.music_server;
     let s = &m.settings;
     let Some((user, host)) = &n.account else {
         return Page::hero(
-            "Sync from Subsonic",
-            "Copy your library and playlists from a Subsonic server, such as Navidrome, over Wi-Fi.",
+            "Sync from a Music Server",
+            "Copy your library and playlists from Jellyfin, Navidrome or another Subsonic server over Wi-Fi.",
         )
         .with_rows(vec![row(
             "Sign In",
-            "subsonic_sign_in",
+            "music_server_sign_in",
             if n.signing_in { "Checking…" } else { "" },
         )
         .with_kind(RowKind::Chevron)]);
     };
     let sync = match n.running {
-        Some((_, 0)) => row("Cancel Sync", "subsonic_cancel", "Listing songs…"),
+        Some((_, 0)) => row("Cancel Sync", "music_server_cancel", "Listing songs…"),
         Some((done, total)) => row(
             "Cancel Sync",
-            "subsonic_cancel",
+            "music_server_cancel",
             format!(
                 "{} of {}",
                 crate::screens::count_label(done),
@@ -459,7 +459,7 @@ fn subsonic(ui: &Ui, m: &AppModel) -> Page {
         ),
         None => row(
             "Sync Now",
-            "subsonic_sync",
+            "music_server_sync",
             match n.last {
                 Some((songs, playlists)) => format!(
                     "{} · {}",
@@ -470,23 +470,36 @@ fn subsonic(ui: &Ui, m: &AppModel) -> Page {
             },
         ),
     };
-    let target = s.subsonic_target.label();
+    let target = s.music_server_target.label();
     Page::rows(vec![
-        row("Account", "subsonic_account", format!("{user} · {host}")),
+        row(
+            "Account",
+            "music_server_account",
+            format!("{user} · {host}"),
+        ),
         sync,
-        row("Sync Automatically", "subsonic_auto", "").with_kind(RowKind::Toggle(s.subsonic_auto)),
+        row("Sync Automatically", "music_server_auto", "")
+            .with_kind(RowKind::Toggle(s.music_server_auto)),
         row(
             "Store On",
-            "subsonic_target",
+            "music_server_target",
             if n.target_missing {
                 format!("{target} · Missing")
             } else {
                 target.to_owned()
             },
         ),
-        row("What to Sync", "subsonic_scope", s.subsonic_scope.label()),
-        row("Quality", "subsonic_quality", s.subsonic_quality.label()),
-        row("Disconnect", "subsonic_disconnect", ""),
+        row(
+            "What to Sync",
+            "music_server_scope",
+            s.music_server_scope.label(),
+        ),
+        row(
+            "Quality",
+            "music_server_quality",
+            s.music_server_quality.label(),
+        ),
+        row("Disconnect", "music_server_disconnect", ""),
     ])
 }
 
@@ -1510,8 +1523,9 @@ fn storage(ui: &Ui, m: &AppModel) -> Page {
         ),
         !m.library.scanning,
     )]);
-    page.rows
-        .push(row("Subsonic", "subsonic", subsonic_summary(ui)).with_kind(RowKind::Chevron));
+    page.rows.push(
+        row("Music Server", "music_server", music_server_summary(ui)).with_kind(RowKind::Chevron),
+    );
     // The computer page opens by itself when a cable is connected; Storage
     // leads back to it only while one is (UI v4: no idle "From a Computer").
     if !usb_summary(m).is_empty() {

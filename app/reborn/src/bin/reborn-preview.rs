@@ -1666,26 +1666,38 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             m.navigation.focus = 6;
         }
     );
-    // Subsonic sync (Settings > Storage > Subsonic).
-    case!("97-subsonic-sign-in", at(Screen::Subsonic, ""), |_, _| {});
-    case!("97b-subsonic-syncing", at(Screen::Subsonic, ""), |ui, m| {
-        ui.subsonic = reborn_ui::SubsonicView {
-            account: Some(("luca".into(), "music.example.com".into())),
-            running: Some((312, 1204)),
-            ..Default::default()
-        };
-        m.settings.subsonic_auto = true;
-        m.navigation.focus = 1;
-    });
-    case!("97c-subsonic-synced", at(Screen::Subsonic, ""), |ui, m| {
-        ui.subsonic = reborn_ui::SubsonicView {
-            account: Some(("luca".into(), "music.example.com".into())),
-            last: Some((1204, 12)),
-            ..Default::default()
-        };
-        m.settings.subsonic_target = reborn_core::subsonic::SyncTarget::SdCard;
-        m.navigation.focus = 3;
-    });
+    // Music server sync (Settings > Storage > Music Server).
+    case!(
+        "97-music_server-sign-in",
+        at(Screen::MusicServer, ""),
+        |_, _| {}
+    );
+    case!(
+        "97b-music_server-syncing",
+        at(Screen::MusicServer, ""),
+        |ui, m| {
+            ui.music_server = reborn_ui::MusicServerView {
+                account: Some(("luca".into(), "music.example.com".into())),
+                running: Some((312, 1204)),
+                ..Default::default()
+            };
+            m.settings.music_server_auto = true;
+            m.navigation.focus = 1;
+        }
+    );
+    case!(
+        "97c-music_server-synced",
+        at(Screen::MusicServer, ""),
+        |ui, m| {
+            ui.music_server = reborn_ui::MusicServerView {
+                account: Some(("luca".into(), "music.example.com".into())),
+                last: Some((1204, 12)),
+                ..Default::default()
+            };
+            m.settings.music_server_target = reborn_core::music_server::SyncTarget::SdCard;
+            m.navigation.focus = 3;
+        }
+    );
     case!(
         "65b-radio-tuning-in",
         at(Screen::NowPlaying, ""),

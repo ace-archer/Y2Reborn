@@ -1,22 +1,39 @@
 # Current Reborn state on the Y2
 
-## Subsonic sync — work in progress (not published; on top of 1.0.0-beta.8.43)
+## Music server sync — work in progress (not published; on top of 1.0.0-beta.8.43)
 
-- Settings → Storage → Subsonic: any server speaking the Subsonic API (Navidrome, Gonic, Airsonic, Ampache, …). Sign in with the server's address, username and password (the full-screen
-  keyboard), then Sync Now, Sync Automatically (on Wi-Fi once the last complete sync is 24 h old; retried after 30 min),
-  Store On (Internal Storage / SD Card), What to Sync (All Music / Playlists Only) and Quality (Original / MP3 320 /
-  MP3 192 kbit/s through the server's transcoder; an MP3 no larger is kept as it is). One-way: the server is the source.
-- `reborn_core::subsonic` (choices, `SubsonicRequest` with the password kept out of `Debug`),
-  `reborn_platform::subsonic` (asks for API 1.13.0, the first with token auth, so older servers answer: token auth `md5(password + salt)`, the password never stored; the
-  address with token on curl's stdin via `--config -`, http or https; `search3` with an empty query pages the library, and a server that refuses it or finds nothing
-  is walked with `getAlbumList2`/`getAlbum`;
-  `getPlaylists`/`getPlaylist`, `download` or `stream?format=mp3`), `app/reborn/src/subsonic.rs` (one worker thread at
-  lower priority, progress on a channel, the automatic sync). Account 0600 in `/data/reborn/state/subsonic.json`.
-- Everything synced lives in `Subsonic/` on the chosen storage: `Artist/Album/NN Title.ext` (FAT-safe names) and
-  `Playlists/<name>.m3u8` with relative entries (a server playlist named Favorites is written as `Favorites (Subsonic)`,
-  so it is not taken for the player's own), plus `Subsonic/.sync.json` listing what the sync put there (it travels
+- Settings → Storage → Music Server: Jellyfin, or any server speaking the Subsonic API (Navidrome, Gonic, Airsonic,
+  Ampache, LMS, …). Sign in with the server's address, username and password (the full-screen keyboard; the address
+  decides the API), then Sync Now, Sync Automatically (on Wi-Fi once the last complete sync is 24 h old; retried after
+  30 min), Store On (Internal Storage / SD Card), What to Sync (All Music / Playlists Only) and Quality (Original / MP3
+  320 / MP3 192 kbit/s through the server's transcoder; an MP3 no larger is kept as it is). One-way: the server is the
+  source.
+- `reborn_core::music_server` (choices, `MusicServerRequest` with the password kept out of `Debug`);
+  `reborn_platform::music_server` (account, curl transport, sync); `reborn_platform::jellyfin` and
+  `reborn_platform::subsonic` speak to the server; `app/reborn/src/music_server.rs` (one worker thread at lower priority,
+  progress on a channel, the automatic sync). Account 0600 in `/data/reborn/state/music_server.json`: a Subsonic token
+  and salt, an OpenSubsonic API key or a Jellyfin access token, never the password. Everything secret (the address with
+  its sign-in, headers, the Jellyfin sign-in body) goes on curl's stdin via `--config -`, http or https; curl reports the
+  HTTP status with `--write-out`.
+- Sign-in asks `/System/Info/Public` first: a `ProductName` with Jellyfin is Jellyfin, anything else is asked as Subsonic.
+- Jellyfin: `POST /Users/AuthenticateByName` with `Authorization: MediaBrowser Client, Device, DeviceId, Version` (the
+  token added after sign-in; the legacy `X-Emby-Token`/`api_key` are off by default since Jellyfin 12). An account its
+  administrator keeps from downloading (`Policy.EnableContentDownloading`) is refused at sign-in and on each sync.
+  `/Items?IncludeItemTypes=Audio&Fields=MediaSources` in pages of 200; audio playlists through
+  `/Playlists/{id}/Items`; originals from `/Items/{id}/Download`, MP3 from
+  `/Audio/{id}/stream?container=mp3&audioCodec=mp3&audioBitRate=…`. The file type comes from the media source's path,
+  else its container (`mov,mp4,m4a,…` is .m4a).
+- Subsonic: asks for API 1.13.0 (the first with token auth, so older servers answer); token auth `md5(password + salt)`.
+  A server refusing tokens (41/42) that lists OpenSubsonic's `apiKeyAuthentication` is asked again with the password
+  field as its `apiKey` (sent without `u`; 44 is a wrong key). `search3` with an empty query pages the library, and a
+  server that refuses it or finds nothing is walked with `getAlbumList2`/`getAlbum`; `getPlaylists`/`getPlaylist`,
+  `download` or `stream?format=mp3`.
+- Everything synced lives in `Music Server/` on the chosen storage: `Artist/Album/NN Title.ext` (FAT-safe names) and
+  `Playlists/<name>.m3u8` with relative entries (a server playlist named Favorites is written as `Favorites (Server)`,
+  so it is not taken for the player's own), plus `Music Server/.sync.json` listing what the sync put there (it travels
   with the card). The list is saved at most every 60 s during a sync and on every stop. Only listed files are ever
-  replaced or removed; each song is downloaded to a hidden `.part` and renamed whole; at least 256 MiB stay free. Songs the server refuses are counted and tried again next time.
+  replaced or removed; each song is downloaded to a hidden `.part` and renamed whole; at least 256 MiB stay free. Songs
+  the server refuses are counted and tried again next time.
 - On the SD card (read-only between writes since Y2Linux 8.27) the whole sync runs inside Reborn's write window:
   `client::SdWriteHold` opens it and asks again every 20 s; Reborn counts its own users of the one `reborn` holder, so a
   playlist change ending its window never closes the card under a sync. A refused window (a card with errors or being
@@ -28,8 +45,8 @@
 - A sync keeps the player awake and Wi-Fi up (`automatic_sleep_tick`, `wifi_idle_tick` count it as work), stops when a
   computer opens the drives or the chosen card goes away, and asks for a quick library scan when it changed anything.
   Wrong login on a sync forgets the account. Disconnect and Reset Settings forget the account; synced music stays.
-- Storage's rows shrink from 44 px to fit (Scan, Subsonic and the occasional computer, setup and repair rows). Skin
-  layout name `subsonic`. Previews 97–97c. Host tests only; not yet run on a player.
+- Storage's rows shrink from 44 px to fit (Scan, Music Server and the occasional computer, setup and repair rows). Skin
+  layout name `music_server`. Previews 97–97c. A Navidrome sync has run on a player; Jellyfin and OpenSubsonic API keys are host-tested only.
 
 ## 1.0.0-beta.8.43 — Y2Linux 1.0 Beta 8.43 (Baseline 164), 2026-10-28 (latest): issue fixes
 

@@ -41,12 +41,12 @@ through ALSA (wired) or BlueALSA (Bluetooth), and keeps its library in SQLite.
   Nothing is recorded until you opt in; Disconnect and Reset Settings forget the sign-in and its
   waiting plays. Full guide, privacy and security:
   [Last.fm scrobbling](https://github.com/SchulzCode/Y2Linux/blob/main/docs/LASTFM.md).
-- **Subsonic sync** (Settings → Storage → Subsonic): sign in to a server that speaks the Subsonic API
-  (Navidrome, Gonic, Airsonic, Ampache and others) and copy
+- **Music server sync** (Settings → Storage → Music Server): sign in to Jellyfin or a server that speaks the
+  Subsonic API (Navidrome, Gonic, Airsonic, Ampache, LMS and others; OpenSubsonic API keys too) and copy
   your library, or only the songs of your playlists, and your playlists to Internal Storage or the SD card over Wi-Fi.
   Sync Now or automatically once a day on Wi-Fi; originals or MP3 made by the server. Everything goes into a
-  `Subsonic` folder and only what the sync put there is ever changed or removed; the password is never stored (only a
-  salted token, in a root-only file).
+  `Music Server` folder and only what the sync put there is ever changed or removed; the password is never stored (only
+  a token or API key, in a root-only file).
 - Sound and playback: five-band equalizer with presets, headphone profiles (47 common
   headphones and IEMs from AutoEQ built in, more as `ParametricEQ.txt` files in an `EQ` folder; up to 10
   filters with a clip-safe preamp),

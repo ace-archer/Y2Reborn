@@ -36,12 +36,12 @@ pub enum Purpose {
     LastFmPassword {
         username: String,
     },
-    /// Subsonic sign-in: the server's address, the username, the password.
-    SubsonicServer,
-    SubsonicUser {
+    /// Music server sign-in: the server's address, the username, the password.
+    MusicServerAddress,
+    MusicServerUser {
         server: String,
     },
-    SubsonicPassword {
+    MusicServerPassword {
         server: String,
         username: String,
     },
@@ -56,15 +56,17 @@ impl Purpose {
             Self::PlaylistNew | Self::PlaylistRename => 60,
             Self::LastFmUser => 32,
             Self::LastFmPassword { .. } => 64,
-            Self::SubsonicServer => 120,
-            Self::SubsonicUser { .. } => 64,
-            Self::SubsonicPassword { .. } => 128,
+            Self::MusicServerAddress => 120,
+            Self::MusicServerUser { .. } => 64,
+            Self::MusicServerPassword { .. } => 128,
         }
     }
     fn secret(&self) -> bool {
         matches!(
             self,
-            Self::WifiPassword { .. } | Self::LastFmPassword { .. } | Self::SubsonicPassword { .. }
+            Self::WifiPassword { .. }
+                | Self::LastFmPassword { .. }
+                | Self::MusicServerPassword { .. }
         )
     }
     pub fn done_label(&self) -> &'static str {
@@ -75,8 +77,8 @@ impl Purpose {
             Self::PlaylistRename => "Rename",
             Self::LastFmUser => "Next",
             Self::LastFmPassword { .. } => "Sign In",
-            Self::SubsonicServer | Self::SubsonicUser { .. } => "Next",
-            Self::SubsonicPassword { .. } => "Sign In",
+            Self::MusicServerAddress | Self::MusicServerUser { .. } => "Next",
+            Self::MusicServerPassword { .. } => "Sign In",
         }
     }
     pub(crate) fn title(&self) -> String {
@@ -89,9 +91,9 @@ impl Purpose {
             Self::PlaylistRename => "Rename Playlist".into(),
             Self::LastFmUser => "Last.fm Username".into(),
             Self::LastFmPassword { .. } => "Last.fm Password".into(),
-            Self::SubsonicServer => "Subsonic Server".into(),
-            Self::SubsonicUser { .. } => "Username".into(),
-            Self::SubsonicPassword { .. } => "Password".into(),
+            Self::MusicServerAddress => "Server Address".into(),
+            Self::MusicServerUser { .. } => "Username".into(),
+            Self::MusicServerPassword { .. } => "Password".into(),
         }
     }
     fn prompt(&self) -> String {
@@ -101,10 +103,12 @@ impl Purpose {
             Self::LibrarySearch => "Artist, album or song".into(),
             Self::PlaylistNew | Self::PlaylistRename => "Playlist name".into(),
             Self::LastFmUser => "Username".into(),
-            Self::LastFmPassword { username } => format!("Password for “{username}”"),
-            Self::SubsonicServer => "Server address".into(),
-            Self::SubsonicUser { server } => format!("Username on {server}"),
-            Self::SubsonicPassword { username, .. } => format!("Password for “{username}”"),
+            Self::LastFmPassword { username } => format!("Password or API key for “{username}”"),
+            Self::MusicServerAddress => "Server address".into(),
+            Self::MusicServerUser { server } => format!("Username on {server}"),
+            Self::MusicServerPassword { username, .. } => {
+                format!("Password or API key for “{username}”")
+            }
         }
     }
 }

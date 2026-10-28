@@ -4,12 +4,12 @@ pub mod books;
 pub mod clock;
 mod countries;
 pub mod eq;
+pub mod music_server;
 pub mod platform;
 pub mod playlist;
 pub mod queue;
 pub mod scrobble;
 pub mod sort;
-pub mod subsonic;
 mod zones;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -928,8 +928,8 @@ pub enum Screen {
     Playlists,
     /// Settings > Last.fm: sign-in, scrobbling and the scrobbler log.
     LastFm,
-    /// Settings > Storage > Subsonic: sign-in, sync and where it goes.
-    Subsonic,
+    /// Settings > Storage > Music Server: sign-in, sync and where it goes.
+    MusicServer,
     /// One playlist; the navigation filter holds its file's path.
     Playlist,
     /// About & Updates > Error Reports; filter "info": what is sent, "save":
@@ -1196,15 +1196,15 @@ pub struct Settings {
     pub lastfm_scrobble: bool,
     #[serde(default = "default_true")]
     pub lastfm_now_playing: bool,
-    /// With a Subsonic account: sync on Wi-Fi at most once a day.
+    /// With a music server account: sync on Wi-Fi at most once a day.
     #[serde(default)]
-    pub subsonic_auto: bool,
+    pub music_server_auto: bool,
     #[serde(default)]
-    pub subsonic_target: subsonic::SyncTarget,
+    pub music_server_target: music_server::SyncTarget,
     #[serde(default)]
-    pub subsonic_scope: subsonic::SyncScope,
+    pub music_server_scope: music_server::SyncScope,
     #[serde(default)]
-    pub subsonic_quality: subsonic::SyncQuality,
+    pub music_server_quality: music_server::SyncQuality,
     /// The one-time "Set Up Internal Storage?" question was shown.
     #[serde(default)]
     pub internal_setup_asked: bool,
@@ -1551,10 +1551,10 @@ impl Default for Settings {
             scrobble_log: false,
             lastfm_scrobble: true,
             lastfm_now_playing: true,
-            subsonic_auto: false,
-            subsonic_target: subsonic::SyncTarget::Internal,
-            subsonic_scope: subsonic::SyncScope::All,
-            subsonic_quality: subsonic::SyncQuality::Original,
+            music_server_auto: false,
+            music_server_target: music_server::SyncTarget::Internal,
+            music_server_scope: music_server::SyncScope::All,
+            music_server_quality: music_server::SyncQuality::Original,
             internal_setup_asked: false,
             hp_level: HpLevel::Low,
             volume_scale: VOLUME_SCALE,
@@ -1825,11 +1825,11 @@ pub enum Effect {
     SetScrobbleLog(bool),
     SetLastFmScrobble(bool),
     SetLastFmNowPlaying(bool),
-    Subsonic(subsonic::SubsonicRequest),
-    SetSubsonicAuto(bool),
-    SetSubsonicTarget(subsonic::SyncTarget),
-    SetSubsonicScope(subsonic::SyncScope),
-    SetSubsonicQuality(subsonic::SyncQuality),
+    MusicServer(music_server::MusicServerRequest),
+    SetMusicServerAuto(bool),
+    SetMusicServerTarget(music_server::SyncTarget),
+    SetMusicServerScope(music_server::SyncScope),
+    SetMusicServerQuality(music_server::SyncQuality),
     SetCodecPreference(CodecPreference),
     Play(usize),
     PlayShuffled(usize),

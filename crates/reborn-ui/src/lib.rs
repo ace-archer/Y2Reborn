@@ -42,8 +42,8 @@ mod views_settings;
 mod views_system;
 
 use reborn_core::{
+    music_server::MusicServerRequest,
     platform::{ChargingState, LowBattery, UsbTransfer, WifiProblem},
-    subsonic::SubsonicRequest,
     Action, AppModel, AudioOutput, CodecPreference, ConfirmAction, Modal, NavigationFrame,
     PlatformTask, RadioRequest, RadioScan, RepeatMode, Screen, ShuffleMode, Track, WrapAround,
 };
@@ -282,9 +282,9 @@ pub struct LastFmView {
     pub busy: bool,
 }
 
-/// Settings > Storage > Subsonic as the player knows it.
+/// Settings > Storage > Music Server as the player knows it.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct SubsonicView {
+pub struct MusicServerView {
     /// The account songs come from: (username, server host).
     pub account: Option<(String, String)>,
     /// The sign-in is being checked with the server.
@@ -396,7 +396,7 @@ pub struct Ui {
     pub bluetooth: BluetoothView,
     pub radio: RadioView,
     pub lastfm: LastFmView,
-    pub subsonic: SubsonicView,
+    pub music_server: MusicServerView,
     pub pairing: Option<String>,
     pub pairing_focus: usize,
     /// The full-screen keyboard, while it is open.
@@ -2807,20 +2807,26 @@ impl Ui {
                 self.keyboard = Some(keyboard::Keyboard::new(keyboard::Purpose::LastFmUser, ""));
                 Effect::None
             }
-            "subsonic_sign_in" => {
+            "music_server_sign_in" => {
                 self.keyboard = Some(keyboard::Keyboard::new(
-                    keyboard::Purpose::SubsonicServer,
+                    keyboard::Purpose::MusicServerAddress,
                     "https://",
                 ));
                 Effect::None
             }
-            "subsonic_sync" => Effect::Subsonic(SubsonicRequest::SyncNow),
-            "subsonic_cancel" => Effect::Subsonic(SubsonicRequest::Cancel),
-            "subsonic_disconnect" => Effect::Subsonic(SubsonicRequest::Disconnect),
-            "subsonic_auto" => Effect::SetSubsonicAuto(!m.settings.subsonic_auto),
-            "subsonic_target" => Effect::SetSubsonicTarget(m.settings.subsonic_target.next()),
-            "subsonic_scope" => Effect::SetSubsonicScope(m.settings.subsonic_scope.next()),
-            "subsonic_quality" => Effect::SetSubsonicQuality(m.settings.subsonic_quality.next()),
+            "music_server_sync" => Effect::MusicServer(MusicServerRequest::SyncNow),
+            "music_server_cancel" => Effect::MusicServer(MusicServerRequest::Cancel),
+            "music_server_disconnect" => Effect::MusicServer(MusicServerRequest::Disconnect),
+            "music_server_auto" => Effect::SetMusicServerAuto(!m.settings.music_server_auto),
+            "music_server_target" => {
+                Effect::SetMusicServerTarget(m.settings.music_server_target.next())
+            }
+            "music_server_scope" => {
+                Effect::SetMusicServerScope(m.settings.music_server_scope.next())
+            }
+            "music_server_quality" => {
+                Effect::SetMusicServerQuality(m.settings.music_server_quality.next())
+            }
             "wrap_around" => Effect::SetWrapAround(m.settings.wrap_around.next()),
             "home_audiobooks" => Effect::SetAudiobooksOnHome(!m.settings.audiobooks_on_home),
             "screen_off_buttons" => {
@@ -3566,24 +3572,24 @@ impl Ui {
                         self.keyboard = None;
                         Effect::LastFm(reborn_core::LastFmRequest::Login { username, password })
                     }
-                    Purpose::SubsonicServer => {
+                    Purpose::MusicServerAddress => {
                         if text.is_empty() || text.ends_with("://") {
                             self.flash("Type the server's address");
                             return Effect::None;
                         }
                         self.keyboard = Some(keyboard::Keyboard::new(
-                            Purpose::SubsonicUser { server: text },
+                            Purpose::MusicServerUser { server: text },
                             "",
                         ));
                         Effect::None
                     }
-                    Purpose::SubsonicUser { server } => {
+                    Purpose::MusicServerUser { server } => {
                         if text.is_empty() {
                             self.flash("Type your username");
                             return Effect::None;
                         }
                         self.keyboard = Some(keyboard::Keyboard::new(
-                            Purpose::SubsonicPassword {
+                            Purpose::MusicServerPassword {
                                 server,
                                 username: text,
                             },
@@ -3591,14 +3597,14 @@ impl Ui {
                         ));
                         Effect::None
                     }
-                    Purpose::SubsonicPassword { server, username } => {
+                    Purpose::MusicServerPassword { server, username } => {
                         if k.text.is_empty() {
                             self.flash("Type your password");
                             return Effect::None;
                         }
                         let password = std::mem::take(&mut k.text);
                         self.keyboard = None;
-                        Effect::Subsonic(SubsonicRequest::Login {
+                        Effect::MusicServer(MusicServerRequest::Login {
                             server,
                             username,
                             password,
@@ -4111,7 +4117,7 @@ fn route(key: &str) -> Option<Screen> {
         "diagnostics" => Screen::Diagnostics,
         "radio" => Screen::Radio,
         "lastfm" => Screen::LastFm,
-        "subsonic" => Screen::Subsonic,
+        "music_server" => Screen::MusicServer,
         "error_reports" => Screen::ErrorReports,
         _ => return None,
     })
