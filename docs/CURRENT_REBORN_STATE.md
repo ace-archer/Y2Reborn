@@ -22,7 +22,8 @@
   checked) stops the sync with the playlists' wording; the log carries the underlying error (`detail`).
 - Sign-in and sync need Wi-Fi Connected or No Internet (a server at home answers without the internet, as for radio).
   The page's refusals (Connect to Wi-Fi first, Insert a working SD card first, …) show as written, not as
-  `friendly_error`'s "Couldn't complete that".
+  `friendly_error`'s "Couldn't complete that"; Settings → Last.fm's refusals (Connect to Wi-Fi first, This build has no
+  Last.fm key, …) likewise.
 - A sync keeps the player awake and Wi-Fi up (`automatic_sleep_tick`, `wifi_idle_tick` count it as work), stops when a
   computer opens the drives or the chosen card goes away, and asks for a quick library scan when it changed anything.
   Wrong login on a sync forgets the account. Disconnect and Reset Settings forget the account; synced music stays.

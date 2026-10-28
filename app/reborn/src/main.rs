@@ -2565,7 +2565,12 @@ impl Runtime {
             }
             Effect::CancelDownload => client::abort_download(),
             Effect::Radio(request) => self.radio(request)?,
-            Effect::LastFm(request) => self.lastfm_request(request)?,
+            // As for Navidrome: a refusal is already in the listener's words.
+            Effect::LastFm(request) => {
+                if let Err(said) = self.lastfm_request(request) {
+                    self.ui.flash(said);
+                }
+            }
             Effect::SetScrobbleLog(on) => {
                 self.model.settings.scrobble_log = on;
                 self.checkpoint();
