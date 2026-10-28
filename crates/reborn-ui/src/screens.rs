@@ -90,6 +90,7 @@ pub fn draw(ui: &Ui, m: &AppModel, tracks: &[Track], has_art: bool) -> Vec<Quad>
             | Screen::Customize
             | Screen::Storage
             | Screen::LastFm
+            | Screen::Navidrome
             | Screen::ErrorReports
             | Screen::Update => views_settings::screen(&mut c, ui, m, tracks, interactive),
             Screen::Playlists | Screen::Playlist => {
@@ -150,6 +151,7 @@ fn native_screen(
         | Screen::Customize
         | Screen::Storage
         | Screen::LastFm
+        | Screen::Navidrome
         | Screen::ErrorReports
         | Screen::Update => views_settings::screen(c, ui, m, tracks, interactive),
         Screen::Playlists | Screen::Playlist => {
@@ -206,6 +208,7 @@ fn layout_keys(m: &AppModel, page: Option<&Page>, empty: bool) -> &'static [&'st
         Screen::PcTransfer => keys!("computer"),
         Screen::SettingsAudio => keys!("sound"),
         Screen::LastFm => keys!("lastfm"),
+        Screen::Navidrome => keys!("navidrome"),
         Screen::SettingsPlayback => keys!("playback"),
         Screen::Crossfade => keys!("crossfade"),
         Screen::Balance => keys!("balance"),
@@ -747,6 +750,7 @@ pub fn screen_title(m: &AppModel) -> String {
         Screen::PcTransfer => "Computer".into(),
         Screen::SettingsAudio => "Sound".into(),
         Screen::LastFm => "Last.fm".into(),
+        Screen::Navidrome => "Navidrome".into(),
         Screen::Equalizer => "Equalizer".into(),
         Screen::SettingsPlayback => "Playback".into(),
         Screen::Crossfade => "Crossfade".into(),

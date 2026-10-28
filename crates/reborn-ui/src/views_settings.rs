@@ -850,30 +850,41 @@ fn storage(c: &mut Canvas, m: &AppModel, page: &Page, focus: usize, interactive:
         }
     }
     let top = 40. + 2. * 84.;
-    components::card(c, 10., top, WIDTH - 20., 44. * page.rows.len() as f32 + 4.);
+    // Every row fits without scrolling: rows shrink from 44 px as the
+    // occasional ones (a computer, setup, repair) join Scan and Navidrome.
+    let row_h = ((HEIGHT - top - 6.) / page.rows.len().max(1) as f32)
+        .floor()
+        .min(44.);
+    components::card(
+        c,
+        10.,
+        top,
+        WIDTH - 20.,
+        row_h * page.rows.len() as f32 + 4.,
+    );
     for (i, row) in page.rows.iter().enumerate() {
-        let y = top + 2. + i as f32 * 44.;
+        let y = top + 2. + i as f32 * row_h;
         if interactive && i == focus && row.enabled {
-            components::focus_row(c, 14., y + 1., WIDTH - 28., 42.);
+            components::focus_row(c, 14., y + 1., WIDTH - 28., row_h - 2.);
         }
         let face = if interactive && i == focus {
             Face::S15
         } else {
             Face::R15
         };
+        let mid = y + row_h / 2.;
         c.text_mid(
             28.,
-            y + 22.,
+            mid,
             280.,
             &row.label,
             face,
             if row.enabled { color::TEXT } else { color::DIM },
         );
         let value = text::fit(Face::R11, &row.secondary, 190.);
-        c.text_mid_right(WIDTH - 40., y + 22., &value, Face::R11, color::MUTED);
-        components::chevron(c, WIDTH - 22., y + 22.);
+        c.text_mid_right(WIDTH - 40., mid, &value, Face::R11, color::MUTED);
+        components::chevron(c, WIDTH - 22., mid);
     }
-    let _ = HEIGHT;
 }
 
 /// Where the update is: Download, Check, Install (the restart). Steps done

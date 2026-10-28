@@ -36,6 +36,15 @@ pub enum Purpose {
     LastFmPassword {
         username: String,
     },
+    /// Navidrome sign-in: the server's address, the username, the password.
+    NavidromeServer,
+    NavidromeUser {
+        server: String,
+    },
+    NavidromePassword {
+        server: String,
+        username: String,
+    },
 }
 
 impl Purpose {
@@ -47,12 +56,17 @@ impl Purpose {
             Self::PlaylistNew | Self::PlaylistRename => 60,
             Self::LastFmUser => 32,
             Self::LastFmPassword { .. } => 64,
+            Self::NavidromeServer => 120,
+            Self::NavidromeUser { .. } => 64,
+            Self::NavidromePassword { .. } => 128,
         }
     }
     fn secret(&self) -> bool {
         matches!(
             self,
-            Self::WifiPassword { .. } | Self::LastFmPassword { .. }
+            Self::WifiPassword { .. }
+                | Self::LastFmPassword { .. }
+                | Self::NavidromePassword { .. }
         )
     }
     pub fn done_label(&self) -> &'static str {
@@ -63,6 +77,8 @@ impl Purpose {
             Self::PlaylistRename => "Rename",
             Self::LastFmUser => "Next",
             Self::LastFmPassword { .. } => "Sign In",
+            Self::NavidromeServer | Self::NavidromeUser { .. } => "Next",
+            Self::NavidromePassword { .. } => "Sign In",
         }
     }
     pub(crate) fn title(&self) -> String {
@@ -75,6 +91,9 @@ impl Purpose {
             Self::PlaylistRename => "Rename Playlist".into(),
             Self::LastFmUser => "Last.fm Username".into(),
             Self::LastFmPassword { .. } => "Last.fm Password".into(),
+            Self::NavidromeServer => "Navidrome Server".into(),
+            Self::NavidromeUser { .. } => "Navidrome Username".into(),
+            Self::NavidromePassword { .. } => "Navidrome Password".into(),
         }
     }
     fn prompt(&self) -> String {
@@ -85,6 +104,9 @@ impl Purpose {
             Self::PlaylistNew | Self::PlaylistRename => "Playlist name".into(),
             Self::LastFmUser => "Username".into(),
             Self::LastFmPassword { username } => format!("Password for “{username}”"),
+            Self::NavidromeServer => "Server address".into(),
+            Self::NavidromeUser { server } => format!("Username on {server}"),
+            Self::NavidromePassword { username, .. } => format!("Password for “{username}”"),
         }
     }
 }

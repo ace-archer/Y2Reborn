@@ -42,6 +42,7 @@ mod views_settings;
 mod views_system;
 
 use reborn_core::{
+    navidrome::NavidromeRequest,
     platform::{ChargingState, LowBattery, UsbTransfer, WifiProblem},
     Action, AppModel, AudioOutput, CodecPreference, ConfirmAction, Modal, NavigationFrame,
     PlatformTask, RadioRequest, RadioScan, RepeatMode, Screen, ShuffleMode, Track, WrapAround,
@@ -281,6 +282,21 @@ pub struct LastFmView {
     pub busy: bool,
 }
 
+/// Settings > Storage > Navidrome as the player knows it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct NavidromeView {
+    /// The account songs come from: (username, server host).
+    pub account: Option<(String, String)>,
+    /// The sign-in is being checked with the server.
+    pub signing_in: bool,
+    /// A sync runs: songs copied of those to copy (0 of 0 while listing).
+    pub running: Option<(usize, usize)>,
+    /// What the last complete sync left: songs and playlists.
+    pub last: Option<(usize, usize)>,
+    /// The chosen storage is not there (no SD card).
+    pub target_missing: bool,
+}
+
 /// Internet radio lists as the player last received them.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RadioView {
@@ -380,6 +396,7 @@ pub struct Ui {
     pub bluetooth: BluetoothView,
     pub radio: RadioView,
     pub lastfm: LastFmView,
+    pub navidrome: NavidromeView,
     pub pairing: Option<String>,
     pub pairing_focus: usize,
     /// The full-screen keyboard, while it is open.
@@ -2790,6 +2807,20 @@ impl Ui {
                 self.keyboard = Some(keyboard::Keyboard::new(keyboard::Purpose::LastFmUser, ""));
                 Effect::None
             }
+            "navidrome_sign_in" => {
+                self.keyboard = Some(keyboard::Keyboard::new(
+                    keyboard::Purpose::NavidromeServer,
+                    "https://",
+                ));
+                Effect::None
+            }
+            "navidrome_sync" => Effect::Navidrome(NavidromeRequest::SyncNow),
+            "navidrome_cancel" => Effect::Navidrome(NavidromeRequest::Cancel),
+            "navidrome_disconnect" => Effect::Navidrome(NavidromeRequest::Disconnect),
+            "navidrome_auto" => Effect::SetNavidromeAuto(!m.settings.navidrome_auto),
+            "navidrome_target" => Effect::SetNavidromeTarget(m.settings.navidrome_target.next()),
+            "navidrome_scope" => Effect::SetNavidromeScope(m.settings.navidrome_scope.next()),
+            "navidrome_quality" => Effect::SetNavidromeQuality(m.settings.navidrome_quality.next()),
             "wrap_around" => Effect::SetWrapAround(m.settings.wrap_around.next()),
             "home_audiobooks" => Effect::SetAudiobooksOnHome(!m.settings.audiobooks_on_home),
             "screen_off_buttons" => {
@@ -3535,6 +3566,44 @@ impl Ui {
                         self.keyboard = None;
                         Effect::LastFm(reborn_core::LastFmRequest::Login { username, password })
                     }
+                    Purpose::NavidromeServer => {
+                        if text.is_empty() || text.ends_with("://") {
+                            self.flash("Type the server's address");
+                            return Effect::None;
+                        }
+                        self.keyboard = Some(keyboard::Keyboard::new(
+                            Purpose::NavidromeUser { server: text },
+                            "",
+                        ));
+                        Effect::None
+                    }
+                    Purpose::NavidromeUser { server } => {
+                        if text.is_empty() {
+                            self.flash("Type your Navidrome username");
+                            return Effect::None;
+                        }
+                        self.keyboard = Some(keyboard::Keyboard::new(
+                            Purpose::NavidromePassword {
+                                server,
+                                username: text,
+                            },
+                            "",
+                        ));
+                        Effect::None
+                    }
+                    Purpose::NavidromePassword { server, username } => {
+                        if k.text.is_empty() {
+                            self.flash("Type your Navidrome password");
+                            return Effect::None;
+                        }
+                        let password = std::mem::take(&mut k.text);
+                        self.keyboard = None;
+                        Effect::Navidrome(NavidromeRequest::Login {
+                            server,
+                            username,
+                            password,
+                        })
+                    }
                     Purpose::RadioSearch => {
                         if text.chars().count() < 2 {
                             self.flash("Type at least two letters");
@@ -4042,6 +4111,7 @@ fn route(key: &str) -> Option<Screen> {
         "diagnostics" => Screen::Diagnostics,
         "radio" => Screen::Radio,
         "lastfm" => Screen::LastFm,
+        "navidrome" => Screen::Navidrome,
         "error_reports" => Screen::ErrorReports,
         _ => return None,
     })

@@ -1,5 +1,27 @@
 # Current Reborn state on the Y2
 
+## Navidrome sync — work in progress (not published; on top of 1.0.0-beta.8.43)
+
+- Settings → Storage → Navidrome: sign in with the server's address, username and password (the full-screen
+  keyboard), then Sync Now, Sync Automatically (on Wi-Fi once the last complete sync is 24 h old; retried after 30 min),
+  Store On (Internal Storage / SD Card), What to Sync (All Music / Playlists Only) and Quality (Original / MP3 320 /
+  MP3 192 kbit/s through the server's transcoder; an MP3 no larger is kept as it is). One-way: the server is the source.
+- `reborn_core::navidrome` (choices, `NavidromeRequest` with the password kept out of `Debug`),
+  `reborn_platform::navidrome` (Subsonic API 1.16.1: token auth `md5(password + salt)`, the password never stored; the
+  address with token on curl's stdin via `--config -`, http or https; `search3` with an empty query pages the library,
+  `getPlaylists`/`getPlaylist`, `download` or `stream?format=mp3`), `app/reborn/src/navidrome.rs` (one worker thread at
+  lower priority, progress on a channel, the automatic sync). Account 0600 in `/data/reborn/state/navidrome.json`.
+- Everything synced lives in `Navidrome/` on the chosen storage: `Artist/Album/NN Title.ext` (FAT-safe names) and
+  `Playlists/<name>.m3u8` with relative entries (a server playlist named Favorites is written as `Favorites (Navidrome)`,
+  so it is not taken for the player's own), plus `Navidrome/.sync.json` listing what the sync put there (it travels
+  with the card). The list is saved at most every 60 s during a sync and on every stop. Only listed files are ever
+  replaced or removed; each song is downloaded to a hidden `.part` and renamed whole; at least 256 MiB stay free. Songs the server refuses are counted and tried again next time.
+- A sync keeps the player awake and Wi-Fi up (`automatic_sleep_tick`, `wifi_idle_tick` count it as work), stops when a
+  computer opens the drives or the chosen card goes away, and asks for a quick library scan when it changed anything.
+  Wrong login on a sync forgets the account. Disconnect and Reset Settings forget the account; synced music stays.
+- Storage's rows shrink from 44 px to fit (Scan, Navidrome and the occasional computer, setup and repair rows). Skin
+  layout name `navidrome`. Previews 97–97c. Host tests only; not yet run on a player.
+
 ## 1.0.0-beta.8.43 — Y2Linux 1.0 Beta 8.43 (Baseline 164), 2026-10-28 (latest): issue fixes
 
 Published as `baseline-164` (Reborn `a08ca5d`, fixes `2eada03`; sequence 11000). #51: Cancel and a held Back leave

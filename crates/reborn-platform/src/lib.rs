@@ -11,6 +11,7 @@ pub mod jack;
 pub mod kernel_events;
 pub mod lastfm;
 mod native;
+pub mod navidrome;
 pub mod playlists;
 pub mod power;
 pub mod radio;

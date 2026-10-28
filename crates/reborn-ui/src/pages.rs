@@ -192,6 +192,7 @@ pub fn page(ui: &Ui, m: &AppModel, tracks: &[Track]) -> Page {
         Screen::PcTransfer => pc_transfer(m),
         Screen::SettingsAudio => sound(ui, m),
         Screen::LastFm => lastfm(ui, m),
+        Screen::Navidrome => navidrome(ui, m),
         Screen::Equalizer => equalizer(ui, m),
         Screen::Crossfade => crossfade(m),
         Screen::Balance => balance(m),
@@ -410,6 +411,83 @@ fn lastfm(ui: &Ui, m: &AppModel) -> Page {
         ),
         log,
         row("Disconnect", "lastfm_disconnect", ""),
+    ])
+}
+
+/// What Settings > Storage says about Navidrome sync.
+fn navidrome_summary(ui: &Ui) -> String {
+    let n = &ui.navidrome;
+    match (&n.account, n.running) {
+        (None, _) => "Off".into(),
+        (Some(_), Some((done, total))) if total > 0 => format!(
+            "Syncing {} of {}",
+            crate::screens::count_label(done),
+            crate::screens::count_label(total)
+        ),
+        (Some(_), Some(_)) => "Syncing…".into(),
+        (Some((user, _)), None) => user.clone(),
+    }
+}
+
+/// Settings > Storage > Navidrome: sign-in, then Sync Now (Cancel while it
+/// runs), the automatic sync and where and what it copies.
+fn navidrome(ui: &Ui, m: &AppModel) -> Page {
+    let n = &ui.navidrome;
+    let s = &m.settings;
+    let Some((user, host)) = &n.account else {
+        return Page::hero(
+            "Sync from Navidrome",
+            "Copy your Navidrome library and playlists to the player over Wi-Fi.",
+        )
+        .with_rows(vec![row(
+            "Sign In",
+            "navidrome_sign_in",
+            if n.signing_in { "Checking…" } else { "" },
+        )
+        .with_kind(RowKind::Chevron)]);
+    };
+    let sync = match n.running {
+        Some((_, 0)) => row("Cancel Sync", "navidrome_cancel", "Listing songs…"),
+        Some((done, total)) => row(
+            "Cancel Sync",
+            "navidrome_cancel",
+            format!(
+                "{} of {}",
+                crate::screens::count_label(done),
+                crate::screens::count_label(total)
+            ),
+        ),
+        None => row(
+            "Sync Now",
+            "navidrome_sync",
+            match n.last {
+                Some((songs, playlists)) => format!(
+                    "{} · {}",
+                    crate::components::count(songs, "song", "songs"),
+                    crate::components::count(playlists, "playlist", "playlists")
+                ),
+                None => "Not synced yet".into(),
+            },
+        ),
+    };
+    let target = s.navidrome_target.label();
+    Page::rows(vec![
+        row("Account", "navidrome_account", format!("{user} · {host}")),
+        sync,
+        row("Sync Automatically", "navidrome_auto", "")
+            .with_kind(RowKind::Toggle(s.navidrome_auto)),
+        row(
+            "Store On",
+            "navidrome_target",
+            if n.target_missing {
+                format!("{target} · Missing")
+            } else {
+                target.to_owned()
+            },
+        ),
+        row("What to Sync", "navidrome_scope", s.navidrome_scope.label()),
+        row("Quality", "navidrome_quality", s.navidrome_quality.label()),
+        row("Disconnect", "navidrome_disconnect", ""),
     ])
 }
 
@@ -1433,6 +1511,8 @@ fn storage(ui: &Ui, m: &AppModel) -> Page {
         ),
         !m.library.scanning,
     )]);
+    page.rows
+        .push(row("Navidrome", "navidrome", navidrome_summary(ui)).with_kind(RowKind::Chevron));
     // The computer page opens by itself when a cable is connected; Storage
     // leads back to it only while one is (UI v4: no idle "From a Computer").
     if !usb_summary(m).is_empty() {

@@ -4362,6 +4362,128 @@ fn lastfm_password_sign_in_never_shows_or_prints_the_password() {
 }
 
 #[test]
+fn navidrome_sign_in_types_server_user_and_a_hidden_password() {
+    use reborn_core::navidrome::NavidromeRequest;
+    let mut ui = radios();
+    let mut m = app(Screen::Navidrome);
+    let page = crate::pages::page(&ui, &m, &[]);
+    assert_eq!(page.hero.expect("signed out").title, "Sync from Navidrome");
+    assert_eq!(
+        select_key(&mut ui, &mut m, "navidrome_sign_in"),
+        Effect::None
+    );
+    // The address starts with https:// typed; an untouched one is refused.
+    assert_eq!(ui.keyboard.as_ref().unwrap().text, "https://");
+    assert_eq!(ui.model_action(&mut m, Action::ContextMenu), Effect::None);
+    assert!(matches!(
+        ui.keyboard.as_ref().map(|k| &k.purpose),
+        Some(crate::keyboard::Purpose::NavidromeServer)
+    ));
+    ui.keyboard.as_mut().unwrap().text = "https://music.example.com".into();
+    assert_eq!(ui.model_action(&mut m, Action::ContextMenu), Effect::None);
+    ui.keyboard.as_mut().unwrap().text = "luca".into();
+    assert_eq!(ui.model_action(&mut m, Action::ContextMenu), Effect::None);
+    assert!(matches!(
+        ui.keyboard.as_ref().map(|k| &k.purpose),
+        Some(crate::keyboard::Purpose::NavidromePassword { .. })
+    ));
+    ui.keyboard.as_mut().unwrap().text = "hunter22".into();
+    let draw = ui.draw(&m, &m.library.tracks, false);
+    assert!(!drawn_text(&draw).contains("hunter22"));
+    let effect = ui.model_action(&mut m, Action::ContextMenu);
+    assert_eq!(
+        effect,
+        Effect::Navidrome(NavidromeRequest::Login {
+            server: "https://music.example.com".into(),
+            username: "luca".into(),
+            password: "hunter22".into()
+        })
+    );
+    assert!(!format!("{effect:?}").contains("hunter22"));
+    assert!(ui.keyboard.is_none());
+}
+
+#[test]
+fn navidrome_page_syncs_and_steps_its_choices() {
+    use crate::NavidromeView;
+    use reborn_core::navidrome::{NavidromeRequest, SyncQuality, SyncScope, SyncTarget};
+    let mut ui = radios();
+    let mut m = app(Screen::Storage);
+    let navidrome_row = |ui: &Ui, m: &AppModel| {
+        ui.rows(m, &[])
+            .into_iter()
+            .find(|r| r.key == "navidrome")
+            .expect("Storage leads to Navidrome")
+    };
+    assert_eq!(navidrome_row(&ui, &m).secondary, "Off");
+    ui.navidrome = NavidromeView {
+        account: Some(("luca".into(), "music.example.com".into())),
+        last: Some((1204, 1)),
+        ..Default::default()
+    };
+    assert_eq!(navidrome_row(&ui, &m).secondary, "luca");
+    assert_eq!(select_key(&mut ui, &mut m, "navidrome"), Effect::None);
+    assert_eq!(m.screen, Screen::Navidrome);
+    let rows = ui.rows(&m, &[]);
+    let keys: Vec<_> = rows.iter().map(|r| r.key.as_str()).collect();
+    assert_eq!(
+        keys,
+        [
+            "navidrome_account",
+            "navidrome_sync",
+            "navidrome_auto",
+            "navidrome_target",
+            "navidrome_scope",
+            "navidrome_quality",
+            "navidrome_disconnect"
+        ]
+    );
+    assert_eq!(rows[0].secondary, "luca · music.example.com");
+    assert_eq!(rows[1].secondary, "1\u{a0}204 songs · 1 playlist");
+    assert_eq!(rows[3].secondary, "Internal Storage");
+    assert_eq!(
+        select_key(&mut ui, &mut m, "navidrome_sync"),
+        Effect::Navidrome(NavidromeRequest::SyncNow)
+    );
+    assert_eq!(
+        select_key(&mut ui, &mut m, "navidrome_auto"),
+        Effect::SetNavidromeAuto(true)
+    );
+    assert_eq!(
+        select_key(&mut ui, &mut m, "navidrome_target"),
+        Effect::SetNavidromeTarget(SyncTarget::SdCard)
+    );
+    assert_eq!(
+        select_key(&mut ui, &mut m, "navidrome_scope"),
+        Effect::SetNavidromeScope(SyncScope::Playlists)
+    );
+    assert_eq!(
+        select_key(&mut ui, &mut m, "navidrome_quality"),
+        Effect::SetNavidromeQuality(SyncQuality::Mp3High)
+    );
+    // A card chosen but not in; a sync running offers Cancel with progress.
+    m.settings.navidrome_target = SyncTarget::SdCard;
+    ui.navidrome.target_missing = true;
+    ui.navidrome.running = Some((12, 300));
+    let rows = ui.rows(&m, &[]);
+    assert_eq!(rows[3].secondary, "SD Card · Missing");
+    assert_eq!(
+        (rows[1].key.as_str(), rows[1].secondary.as_str()),
+        ("navidrome_cancel", "12 of 300")
+    );
+    assert_eq!(
+        select_key(&mut ui, &mut m, "navidrome_cancel"),
+        Effect::Navidrome(NavidromeRequest::Cancel)
+    );
+    assert_eq!(
+        select_key(&mut ui, &mut m, "navidrome_disconnect"),
+        Effect::Navidrome(NavidromeRequest::Disconnect)
+    );
+    m.screen = Screen::Storage;
+    assert_eq!(navidrome_row(&ui, &m).secondary, "Syncing 12 of 300");
+}
+
+#[test]
 fn internal_storage_setup_is_offered_only_for_a_waiting_old_library_and_confirmed_red() {
     use reborn_core::platform::{InternalSetup, SetupWait};
     let mut ui = radios();

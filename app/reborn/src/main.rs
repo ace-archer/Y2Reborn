@@ -5,6 +5,7 @@ mod books;
 mod diagnostics;
 mod graphics_recovery;
 mod meter;
+mod navidrome;
 mod performance;
 mod playback;
 mod playlists;
@@ -304,6 +305,8 @@ struct Runtime {
     clock_trusted: Option<(Instant, bool)>,
     /// Last.fm: the app's key, the listener's session, sign-in and sending.
     lastfm: scrobbling::LastFm,
+    /// Navidrome: the account, the sync running and the automatic sync.
+    navidrome: navidrome::Navidrome,
     /// Station logos: downloads (once per logo) and the logo shown as Now
     /// Playing's picture.
     radio_logos: Option<LogoFetcher>,
@@ -2575,6 +2578,24 @@ impl Runtime {
                 self.model.settings.lastfm_now_playing = on;
                 self.checkpoint();
             }
+            Effect::Navidrome(request) => self.navidrome_request(request)?,
+            Effect::SetNavidromeAuto(on) => {
+                self.model.settings.navidrome_auto = on;
+                self.checkpoint();
+            }
+            Effect::SetNavidromeTarget(target) => {
+                self.model.settings.navidrome_target = target;
+                self.checkpoint();
+                self.navidrome_view();
+            }
+            Effect::SetNavidromeScope(scope) => {
+                self.model.settings.navidrome_scope = scope;
+                self.checkpoint();
+            }
+            Effect::SetNavidromeQuality(quality) => {
+                self.model.settings.navidrome_quality = quality;
+                self.checkpoint();
+            }
             Effect::Playlist(request) => self.playlist(*request)?,
             Effect::SetCodecPreference(preference) => {
                 if !codec_change_allowed(
@@ -3030,6 +3051,8 @@ impl Runtime {
             Effect::ResetSettings => {
                 // The Last.fm sign-in is a setting too: forget it and its plays.
                 self.lastfm_forget();
+                // So is the Navidrome sign-in (the synced music stays).
+                self.navidrome_forget();
                 // Volume and the music location are part of the session, not
                 // preferences a reset should surprise the listener with.
                 let defaults = reborn_core::Settings {
@@ -3810,7 +3833,9 @@ impl Runtime {
             self.model.playback,
             PlaybackState::Playing | PlaybackState::Buffering
         );
-        let busy = self.model.platform.busy.is_some() || self.ui.wifi.scan.active();
+        let busy = self.model.platform.busy.is_some()
+            || self.ui.wifi.scan.active()
+            || self.navidrome.busy();
         let on_battery =
             self.model.platform.battery.charging == reborn_core::platform::ChargingState::OnBattery;
         if !reborn_core::platform::wifi_idle_power_down(
@@ -3884,7 +3909,8 @@ impl Runtime {
             || self.playback.has_pending_start()
             || self.pending_reconfiguration.is_some()
             || self.model.library.scanning
-            || self.query.is_some();
+            || self.query.is_some()
+            || self.navidrome.busy();
         if playing || busy || !self.model.screen_off {
             self.sleep_attempt = Some(Instant::now());
             return;
@@ -4837,6 +4863,7 @@ fn run() -> Result<(), String> {
         scrobble_queue: reborn_platform::scrobble::Queue::new(root.join("state/scrobbles.jsonl")),
         clock_trusted: None,
         lastfm: scrobbling::LastFm::load(&root),
+        navidrome: navidrome::Navidrome::load(&root),
         radio_logos: if headless {
             None
         } else {
@@ -4879,6 +4906,7 @@ fn run() -> Result<(), String> {
         .map(|s| s.key().to_owned())
         .collect();
     rt.lastfm_view();
+    rt.navidrome_view();
     if !rt.model.settings.theme.is_empty() {
         let id = rt.model.settings.theme.clone();
         // A skin on a missing SD card or a refused skin falls back to Reborn's
@@ -5741,6 +5769,7 @@ fn run() -> Result<(), String> {
         rt.scrobble_tick();
         rt.note_history();
         rt.lastfm_tick();
+        rt.navidrome_tick();
         let mut bt_lost = false;
         if let Some(service) = &rt.bluetooth {
             while let Ok(s) = service.events.try_recv() {
@@ -6207,6 +6236,8 @@ fn run() -> Result<(), String> {
             rt.loud_listening_tick(periodic.elapsed());
             periodic = Instant::now();
             rt.automatic_sleep_tick();
+            // A card in or out changes what Navidrome can sync to.
+            rt.navidrome_view();
             if rt.background.update(
                 &rt.model.settings.music_directory,
                 &rt.model.sources,

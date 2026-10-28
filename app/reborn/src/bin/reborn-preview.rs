@@ -1666,6 +1666,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             m.navigation.focus = 6;
         }
     );
+    // Navidrome sync (Settings > Storage > Navidrome).
+    case!("97-navidrome-sign-in", at(Screen::Navidrome, ""), |_, _| {});
+    case!(
+        "97b-navidrome-syncing",
+        at(Screen::Navidrome, ""),
+        |ui, m| {
+            ui.navidrome = reborn_ui::NavidromeView {
+                account: Some(("luca".into(), "music.example.com".into())),
+                running: Some((312, 1204)),
+                ..Default::default()
+            };
+            m.settings.navidrome_auto = true;
+            m.navigation.focus = 1;
+        }
+    );
+    case!(
+        "97c-navidrome-synced",
+        at(Screen::Navidrome, ""),
+        |ui, m| {
+            ui.navidrome = reborn_ui::NavidromeView {
+                account: Some(("luca".into(), "music.example.com".into())),
+                last: Some((1204, 12)),
+                ..Default::default()
+            };
+            m.settings.navidrome_target = reborn_core::navidrome::SyncTarget::SdCard;
+            m.navigation.focus = 3;
+        }
+    );
     case!(
         "65b-radio-tuning-in",
         at(Screen::NowPlaying, ""),
