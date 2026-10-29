@@ -39,7 +39,10 @@
   with the card). The list is saved at most every 60 s during a sync and on every stop. Only listed files are ever
   replaced or removed (another server or quality keeps a file it would put at the same place, the same file, so
   Navidrome → Jellyfin over one library or Original → MP3 for MP3s copies nothing again); each song is downloaded to a hidden `.part` and renamed whole; at least 256 MiB stay free. Songs
-  the server refuses are counted and tried again next time.
+  the server refuses are counted and tried again next time. Nothing goes before the copying, so the library keeps
+  playing during a sync: a song copied again keeps its old file until the new one is in, and songs no longer wanted
+  (or another account's) go at the end, or first when the space runs out. A song whose file is gone from storage that
+  is there says "This song isn't on the player anymore", not to reinsert the SD card.
 - On the SD card (read-only between writes since Y2Linux 8.27) the whole sync runs inside Reborn's write window:
   `client::SdWriteHold` opens it and asks again every 20 s; Reborn counts its own users of the one `reborn` holder, so a
   playlist change ending its window never closes the card under a sync. A refused window (a card with errors or being

@@ -1852,7 +1852,19 @@ impl Runtime {
         let track = self.model.current().cloned().ok_or("queue is empty")?;
         let radio = track.is_radio();
         if !radio && !track.path.is_file() {
-            return Err("track source unavailable".into());
+            // A file gone from storage that is there (removed since the last
+            // scan, e.g. by a music server sync) is not a card to reinsert.
+            let source_there = self
+                .model
+                .sources
+                .iter()
+                .any(|s| s.online && s.id == track.source_id && s.root.is_dir());
+            return Err(if source_there {
+                "track file missing"
+            } else {
+                "track source unavailable"
+            }
+            .into());
         }
         let _source = if radio {
             None
@@ -4513,6 +4525,9 @@ fn friendly_error(error: &str) -> String {
     if lower.contains("connect bluetooth") || lower.contains("pause music") {
         // Already user language.
         return error.to_owned();
+    }
+    if lower.contains("track file missing") {
+        return "This song isn't on the player anymore.".into();
     }
     if lower.contains("source offline") || lower.contains("source unavailable") {
         return "This song is on storage that isn't available. Reinsert the SD card.".into();
@@ -7191,6 +7206,13 @@ mod bluetooth_epoch_tests {
         assert!(super::refused_card_error(missing, SdCard::CheckTimedOut)
             .is_some_and(|m| m.contains("too long")));
         assert_eq!(super::refused_card_error(missing, SdCard::Absent), None);
+        // A file gone from a card that is there asks for no reinsert either.
+        let gone = "track file missing";
+        assert_eq!(super::refused_card_error(gone, SdCard::NeedsRepair), None);
+        assert_eq!(
+            super::friendly_error(gone),
+            "This song isn't on the player anymore."
+        );
         assert_eq!(
             super::refused_card_error("queue is empty", SdCard::NeedsRepair),
             None

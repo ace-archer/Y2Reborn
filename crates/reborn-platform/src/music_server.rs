@@ -730,31 +730,29 @@ pub fn sync(
     };
     let mut manifest = load_manifest(root);
     let account = client.account();
-    let mut removed = 0;
     if manifest.server != account.server || manifest.username != account.username {
         // Another server's songs carry other ids. One this server would put
         // at the same place, as the same file, is kept for it (often the same
-        // library behind another server); the rest goes.
-        let mut left: HashMap<String, Kept> = mem::take(&mut manifest.songs)
-            .into_values()
-            .map(|k| (k.path.to_lowercase(), k))
+        // library behind another server); the rest goes at the end, listed
+        // apart so no id of this server meets them.
+        let mut left: HashMap<String, (String, Kept)> = mem::take(&mut manifest.songs)
+            .into_iter()
+            .map(|(id, k)| (k.path.to_lowercase(), (id, k)))
             .collect();
         for s in &wanted {
             let path = s.relative_path(options.quality);
             let path = path.to_string_lossy().to_lowercase();
-            if left.get(&path).is_some_and(|k| {
+            if left.get(&path).is_some_and(|(_, k)| {
                 k.size == s.size && s.transcode(k.quality) == s.transcode(options.quality)
             }) {
-                manifest
-                    .songs
-                    .insert(s.id.clone(), left.remove(&path).unwrap());
+                let (_, k) = left.remove(&path).unwrap();
+                manifest.songs.insert(s.id.clone(), k);
             }
         }
         if !options.keep {
-            for k in left.values() {
-                let _ = fs::remove_file(dir.join(&k.path));
+            for (id, k) in left.into_values() {
+                manifest.songs.insert(format!("{PREVIOUS}{id}"), k);
             }
-            removed = left.len();
         }
         manifest.server = account.server.clone();
         manifest.username = account.username.clone();
@@ -774,24 +772,41 @@ pub fn sync(
             .songs
             .retain(|id, _| wanted_ids.contains_key(id.as_str()));
     }
-    let mut summary = Summary {
-        removed: removed
-            + remove_songs(&dir, &mut manifest, |(id, k)| {
-                wanted_ids.get(id.as_str()).is_none_or(|s| !unchanged(s, k))
-            }),
-        ..Summary::default()
+    // Nothing goes before the copying: a song copied again replaces its file
+    // once the new one is in, and songs no longer wanted go at the end (or
+    // when the space runs out first), so the library keeps playing meanwhile.
+    let mut summary = Summary::default();
+    let mut dropped = false;
+    let mut drop_unwanted = |manifest: &mut Manifest| {
+        if mem::replace(&mut dropped, true) {
+            return 0;
+        }
+        remove_songs(&dir, manifest, |(id, _)| {
+            !wanted_ids.contains_key(id.as_str())
+        })
     };
     let mut used: HashSet<String> = manifest
         .songs
         .values()
         .map(|k| k.path.to_lowercase())
         .collect();
-    let copy: Vec<(&Song, String)> = wanted
+    // (song, where it goes, the file it replaces)
+    let copy: Vec<(&Song, String, Option<String>)> = wanted
         .iter()
-        .filter(|s| !manifest.songs.contains_key(&s.id))
-        .map(|s| {
-            let path = unique_path(s, options.quality, &mut used);
-            (s, path)
+        .filter_map(|s| {
+            let old = manifest.songs.get(&s.id);
+            if old.is_some_and(|k| unchanged(s, k)) {
+                return None;
+            }
+            let old = old.map(|k| k.path.clone());
+            let same = s.relative_path(options.quality);
+            let path = match old {
+                Some(ref o) if o.to_lowercase() == same.to_string_lossy().to_lowercase() => {
+                    o.clone()
+                }
+                _ => unique_path(s, options.quality, &mut used),
+            };
+            Some((s, path, old))
         })
         .collect();
     let mut saved = Instant::now();
@@ -803,16 +818,20 @@ pub fn sync(
     // Every way out of the copying keeps the list of what was copied
     // (best effort: the error that stopped it is the one to report).
     let copied = (|| {
-        for (song, path) in &copy {
+        for (song, path, old) in &copy {
             if cancel.load(Ordering::Relaxed) {
                 return Err(Error::Cancelled);
             }
-            let free = crate::free_bytes(&dir).map_err(Error::Storage)?;
-            if free
-                < song
-                    .expected_bytes(options.quality)
-                    .saturating_add(options.reserve)
-            {
+            let needed = song
+                .expected_bytes(options.quality)
+                .saturating_add(options.reserve);
+            let mut free = crate::free_bytes(&dir).map_err(Error::Storage)?;
+            if free < needed {
+                // Room first from the songs no longer wanted (once).
+                summary.removed += drop_unwanted(&mut manifest);
+                free = crate::free_bytes(&dir).map_err(Error::Storage)?;
+            }
+            if free < needed {
                 summary.full = true;
                 break;
             }
@@ -835,6 +854,14 @@ pub fn sync(
                         },
                     );
                     summary.downloaded += 1;
+                    if let Some(old) = old {
+                        summary.removed += 1;
+                        // Its old file, unless the new one took its place or
+                        // another song has it now.
+                        if old != path && !manifest.songs.values().any(|k| &k.path == old) {
+                            let _ = fs::remove_file(dir.join(old));
+                        }
+                    }
                 }
                 Err(Error::Refused(..) | Error::NotAServer) => {
                     let _ = fs::remove_file(&part);
@@ -858,6 +885,7 @@ pub fn sync(
         let _ = save_manifest(root, &manifest);
         return Err(e);
     }
+    summary.removed += drop_unwanted(&mut manifest);
     summary.playlists = write_playlists(&dir, &mut manifest, &playlists, options.keep)?;
     remove_empty_folders(&dir);
     summary.songs = manifest.songs.len();
@@ -865,6 +893,9 @@ pub fn sync(
     save_manifest(root, &manifest)?;
     Ok(summary)
 }
+
+/// Manifest key of a song another account's sync left, removed at the end.
+const PREVIOUS: &str = "previous:";
 
 /// Remove the kept songs `drop` picks (a file already gone is fine).
 fn remove_songs(
@@ -1351,6 +1382,106 @@ mod tests {
         let after = sync(&client, &music, &chosen, &never, &mut |_| {}).unwrap();
         assert_eq!((after.removed, after.songs), (1, 1));
         assert!(!sync_dir.join("Bauhaus/Mask/01 Three.flac").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn songs_stay_playable_while_a_sync_replaces_and_drops_them() {
+        let root = dir("playable");
+        let music = root.join("music");
+        let songs = vec![
+            song("s1", "One", 10),
+            song("s2", "Two", 20),
+            song("s3", "Three", 30),
+        ];
+        let client = fake::server(&root, &songs, &[]);
+        let never = AtomicBool::new(false);
+        sync(
+            &client,
+            &music,
+            &options(SyncScope::All),
+            &never,
+            &mut |_| {},
+        )
+        .unwrap();
+        let sync_dir = folder(&music);
+        let flac = |t: &str| sync_dir.join(format!("Bauhaus/Mask/01 {t}.flac"));
+        let mp3 = |t: &str| sync_dir.join(format!("Bauhaus/Mask/01 {t}.mp3"));
+        // The server drops Three; the rest go to MP3.
+        let client = fake::server(&root, &songs[..2], &[]);
+        let mut seen = vec![];
+        let summary = sync(
+            &client,
+            &music,
+            &Options {
+                quality: SyncQuality::Mp3High,
+                ..options(SyncScope::All)
+            },
+            &never,
+            &mut |p| {
+                // Between songs: each one has a file, old or new, and the
+                // dropped song is still there.
+                seen.push((
+                    p.done,
+                    flac("One").is_file() != mp3("One").is_file(),
+                    flac("Two").is_file() != mp3("Two").is_file(),
+                    flac("Three").is_file(),
+                ));
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            seen,
+            [
+                (0, true, true, true),
+                (1, true, true, true),
+                (2, true, true, true)
+            ]
+        );
+        assert_eq!(
+            (summary.downloaded, summary.removed, summary.songs),
+            (2, 3, 2)
+        );
+        assert!(mp3("One").is_file() && mp3("Two").is_file());
+        assert!(!flac("One").exists() && !flac("Two").exists() && !flac("Three").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_full_card_makes_room_from_songs_no_longer_wanted_first() {
+        let root = dir("room");
+        let music = root.join("music");
+        let songs = vec![song("s1", "One", 10), song("s2", "Two", 20)];
+        let client = fake::server(&root, &songs, &[]);
+        let never = AtomicBool::new(false);
+        sync(
+            &client,
+            &music,
+            &options(SyncScope::All),
+            &never,
+            &mut |_| {},
+        )
+        .unwrap();
+        // Two leaves, Three arrives, and there is never room.
+        let client = fake::server(
+            &root,
+            &[song("s1", "One", 10), song("s3", "Three", 30)],
+            &[],
+        );
+        let full = sync(
+            &client,
+            &music,
+            &Options {
+                reserve: u64::MAX / 2,
+                ..options(SyncScope::All)
+            },
+            &never,
+            &mut |_| {},
+        )
+        .unwrap();
+        assert!(full.full);
+        assert_eq!((full.removed, full.downloaded, full.songs), (1, 0, 1));
+        assert!(!folder(&music).join("Bauhaus/Mask/01 Two.flac").exists());
         fs::remove_dir_all(root).unwrap();
     }
 
