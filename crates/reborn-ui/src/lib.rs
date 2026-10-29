@@ -2827,6 +2827,7 @@ impl Ui {
             "music_server_quality" => {
                 Effect::SetMusicServerQuality(m.settings.music_server_quality.next())
             }
+            "music_server_keep" => Effect::SetMusicServerKeep(!m.settings.music_server_keep),
             "wrap_around" => Effect::SetWrapAround(m.settings.wrap_around.next()),
             "home_audiobooks" => Effect::SetAudiobooksOnHome(!m.settings.audiobooks_on_home),
             "screen_off_buttons" => {

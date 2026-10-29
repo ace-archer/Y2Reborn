@@ -262,6 +262,7 @@ impl Runtime {
         let options = api::Options {
             scope: self.model.settings.music_server_scope,
             quality: self.model.settings.music_server_quality,
+            keep: self.model.settings.music_server_keep,
             now_unix: now_unix.unwrap_or(0),
             reserve: api::RESERVE,
         };
@@ -312,6 +313,7 @@ impl Runtime {
                 "target": self.model.settings.music_server_target,
                 "scope": self.model.settings.music_server_scope,
                 "quality": self.model.settings.music_server_quality,
+                "keep": self.model.settings.music_server_keep,
             }),
         );
         Ok(())

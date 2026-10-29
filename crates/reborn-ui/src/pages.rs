@@ -499,6 +499,8 @@ fn music_server(ui: &Ui, m: &AppModel) -> Page {
             "music_server_quality",
             s.music_server_quality.label(),
         ),
+        row("Keep Removed Music", "music_server_keep", "")
+            .with_kind(RowKind::Toggle(s.music_server_keep)),
         row("Disconnect", "music_server_disconnect", ""),
     ])
 }

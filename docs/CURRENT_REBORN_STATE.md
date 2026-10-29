@@ -5,9 +5,10 @@
 - Settings → Storage → Music Server: Jellyfin, or any server speaking the Subsonic API (Navidrome, Gonic, Airsonic,
   Ampache, LMS, …). Sign in with the server's address, username and password (the full-screen keyboard; the address
   decides the API), then Sync Now, Sync Automatically (on Wi-Fi once the last complete sync is 24 h old; retried after
-  30 min), Store On (Internal Storage / SD Card), What to Sync (All Music / Playlists Only) and Quality (Original / MP3
-  320 / MP3 192 kbit/s through the server's transcoder; an MP3 no larger is kept as it is). One-way: the server is the
-  source.
+  30 min), Store On (Internal Storage / SD Card), What to Sync (All Music / Playlists Only), Quality (Original / MP3
+  320 / MP3 192 kbit/s through the server's transcoder; an MP3 no larger is kept as it is) and Keep Removed Music (songs
+  and playlists gone from the server, from what is synced or with another account stay, no longer the sync's; a song
+  copied again in a new form still replaces its file). One-way: the server is the source.
 - `reborn_core::music_server` (choices, `MusicServerRequest` with the password kept out of `Debug`);
   `reborn_platform::music_server` (account, curl transport, sync); `reborn_platform::jellyfin` and
   `reborn_platform::subsonic` speak to the server; `app/reborn/src/music_server.rs` (one worker thread at lower priority,
@@ -32,7 +33,8 @@
   `Playlists/<name>.m3u8` with relative entries (a server playlist named Favorites is written as `Favorites (Server)`,
   so it is not taken for the player's own), plus `Music Server/.sync.json` listing what the sync put there (it travels
   with the card). The list is saved at most every 60 s during a sync and on every stop. Only listed files are ever
-  replaced or removed; each song is downloaded to a hidden `.part` and renamed whole; at least 256 MiB stay free. Songs
+  replaced or removed (another server or quality keeps a file it would put at the same place, the same file, so
+  Navidrome → Jellyfin over one library or Original → MP3 for MP3s copies nothing again); each song is downloaded to a hidden `.part` and renamed whole; at least 256 MiB stay free. Songs
   the server refuses are counted and tried again next time.
 - On the SD card (read-only between writes since Y2Linux 8.27) the whole sync runs inside Reborn's write window:
   `client::SdWriteHold` opens it and asks again every 20 s; Reborn counts its own users of the one `reborn` holder, so a

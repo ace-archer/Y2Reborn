@@ -382,6 +382,7 @@ mod tests {
         let options = Options {
             scope: SyncScope::All,
             quality: SyncQuality::Original,
+            keep: false,
             now_unix: 1_800_000_000,
             reserve: 0,
         };

@@ -1205,6 +1205,10 @@ pub struct Settings {
     pub music_server_scope: music_server::SyncScope,
     #[serde(default)]
     pub music_server_quality: music_server::SyncQuality,
+    /// Songs and playlists gone from the server (or from what is synced)
+    /// stay on the player, no longer the sync's.
+    #[serde(default)]
+    pub music_server_keep: bool,
     /// The one-time "Set Up Internal Storage?" question was shown.
     #[serde(default)]
     pub internal_setup_asked: bool,
@@ -1555,6 +1559,7 @@ impl Default for Settings {
             music_server_target: music_server::SyncTarget::Internal,
             music_server_scope: music_server::SyncScope::All,
             music_server_quality: music_server::SyncQuality::Original,
+            music_server_keep: false,
             internal_setup_asked: false,
             hp_level: HpLevel::Low,
             volume_scale: VOLUME_SCALE,
@@ -1830,6 +1835,7 @@ pub enum Effect {
     SetMusicServerTarget(music_server::SyncTarget),
     SetMusicServerScope(music_server::SyncScope),
     SetMusicServerQuality(music_server::SyncQuality),
+    SetMusicServerKeep(bool),
     SetCodecPreference(CodecPreference),
     Play(usize),
     PlayShuffled(usize),

@@ -2607,6 +2607,10 @@ impl Runtime {
                 self.model.settings.music_server_quality = quality;
                 self.checkpoint();
             }
+            Effect::SetMusicServerKeep(keep) => {
+                self.model.settings.music_server_keep = keep;
+                self.checkpoint();
+            }
             Effect::Playlist(request) => self.playlist(*request)?,
             Effect::SetCodecPreference(preference) => {
                 if !codec_change_allowed(

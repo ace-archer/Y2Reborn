@@ -4438,6 +4438,7 @@ fn music_server_page_syncs_and_steps_its_choices() {
             "music_server_target",
             "music_server_scope",
             "music_server_quality",
+            "music_server_keep",
             "music_server_disconnect"
         ]
     );
@@ -4463,6 +4464,10 @@ fn music_server_page_syncs_and_steps_its_choices() {
     assert_eq!(
         select_key(&mut ui, &mut m, "music_server_quality"),
         Effect::SetMusicServerQuality(SyncQuality::Mp3High)
+    );
+    assert_eq!(
+        select_key(&mut ui, &mut m, "music_server_keep"),
+        Effect::SetMusicServerKeep(true)
     );
     // A card chosen but not in; a sync running offers Cancel with progress.
     m.settings.music_server_target = SyncTarget::SdCard;

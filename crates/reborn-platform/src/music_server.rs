@@ -23,6 +23,7 @@ use serde_json::Value;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Write};
+use std::mem;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -620,6 +621,9 @@ pub(crate) fn save_manifest(root: &Path, manifest: &Manifest) -> Result<(), Erro
 pub struct Options {
     pub scope: SyncScope,
     pub quality: SyncQuality,
+    /// Songs and playlists no longer wanted stay, forgotten rather than
+    /// removed (a song copied again in a new form still replaces its file).
+    pub keep: bool,
     pub now_unix: i64,
     /// Free space left on the storage (`RESERVE`; tests choose).
     pub reserve: u64,
@@ -677,8 +681,30 @@ pub fn sync(
     let account = client.account();
     let mut removed = 0;
     if manifest.server != account.server || manifest.username != account.username {
-        // Another server's songs: none of them is wanted.
-        removed = remove_songs(&dir, &mut manifest, |_| true);
+        // Another server's songs carry other ids. One this server would put
+        // at the same place, as the same file, is kept for it (often the same
+        // library behind another server); the rest goes.
+        let mut left: HashMap<String, Kept> = mem::take(&mut manifest.songs)
+            .into_values()
+            .map(|k| (k.path.to_lowercase(), k))
+            .collect();
+        for s in &wanted {
+            let path = s.relative_path(options.quality);
+            let path = path.to_string_lossy().to_lowercase();
+            if left.get(&path).is_some_and(|k| {
+                k.size == s.size && s.transcode(k.quality) == s.transcode(options.quality)
+            }) {
+                manifest
+                    .songs
+                    .insert(s.id.clone(), left.remove(&path).unwrap());
+            }
+        }
+        if !options.keep {
+            for k in left.values() {
+                let _ = fs::remove_file(dir.join(&k.path));
+            }
+            removed = left.len();
+        }
         manifest.server = account.server.clone();
         manifest.username = account.username.clone();
         manifest.synced_at = 0;
@@ -692,6 +718,11 @@ pub fn sync(
             && dir.join(&k.path).is_file()
     };
     let wanted_ids: HashMap<&str, &Song> = wanted.iter().map(|s| (s.id.as_str(), s)).collect();
+    if options.keep {
+        manifest
+            .songs
+            .retain(|id, _| wanted_ids.contains_key(id.as_str()));
+    }
     let mut summary = Summary {
         removed: removed
             + remove_songs(&dir, &mut manifest, |(id, k)| {
@@ -776,7 +807,7 @@ pub fn sync(
         let _ = save_manifest(root, &manifest);
         return Err(e);
     }
-    summary.playlists = write_playlists(&dir, &mut manifest, &playlists)?;
+    summary.playlists = write_playlists(&dir, &mut manifest, &playlists, options.keep)?;
     remove_empty_folders(&dir);
     summary.songs = manifest.songs.len();
     manifest.synced_at = options.now_unix;
@@ -833,6 +864,7 @@ fn write_playlists(
     dir: &Path,
     manifest: &mut Manifest,
     playlists: &[RemotePlaylist],
+    keep: bool,
 ) -> Result<usize, Error> {
     let folder = dir.join(PLAYLISTS);
     let mut written = BTreeMap::new();
@@ -871,8 +903,14 @@ fn write_playlists(
         }
         written.insert(p.id.clone(), relative);
     }
+    // A renamed playlist leaves its old file; one gone from the server is
+    // kept on request.
     for (id, relative) in &manifest.playlists {
-        if written.get(id) != Some(relative) && !written.values().any(|r| r == relative) {
+        let gone = !written.contains_key(id);
+        if written.get(id) != Some(relative)
+            && !written.values().any(|r| r == relative)
+            && !(keep && gone)
+        {
             let _ = fs::remove_file(dir.join(relative));
         }
     }
@@ -1074,6 +1112,7 @@ mod tests {
         Options {
             scope,
             quality: SyncQuality::Original,
+            keep: false,
             now_unix: 1_800_000_000,
             reserve: 0,
         }
@@ -1217,6 +1256,65 @@ mod tests {
     }
 
     #[test]
+    fn kept_music_stays_when_the_server_drops_it() {
+        let root = dir("keep");
+        let music = root.join("music");
+        let songs = vec![song("s1", "One", 10), song("s2", "Two", 20)];
+        let client = fake::server(&root, &songs, &["s1", "s2"]);
+        let never = AtomicBool::new(false);
+        let keep = Options {
+            keep: true,
+            ..options(SyncScope::All)
+        };
+        sync(&client, &music, &keep, &never, &mut |_| {}).unwrap();
+        // The server drops Two and the Favorites playlist.
+        fake::server(&root, &songs[..1], &["s1"]);
+        fs::write(
+            root.join("playlists.json"),
+            fake::ok(
+                serde_json::json!({"playlists": {"playlist": [{"id": "p1", "name": "Road/Trip"}]}}),
+            ),
+        )
+        .unwrap();
+        let after = sync(&client, &music, &keep, &never, &mut |_| {}).unwrap();
+        assert_eq!(
+            (
+                after.removed,
+                after.downloaded,
+                after.songs,
+                after.playlists
+            ),
+            (0, 0, 1, 1)
+        );
+        let sync_dir = folder(&music);
+        let two = sync_dir.join("Bauhaus/Mask/01 Two.flac");
+        let favorites = sync_dir.join("Playlists/favorites (Server).m3u8");
+        assert!(two.is_file() && favorites.is_file());
+        // Forgotten: a sync that removes again leaves them be.
+        let plain = sync(
+            &client,
+            &music,
+            &options(SyncScope::All),
+            &never,
+            &mut |_| {},
+        )
+        .unwrap();
+        assert_eq!(plain.removed, 0);
+        assert!(two.is_file() && favorites.is_file());
+        // Another server's sync keeps the songs it has no use for too.
+        fake::server(&root, &[song("k9", "Nine", 90)], &[]);
+        let other = fake::client(
+            &root,
+            Account::subsonic_token("http://other:4533".into(), "kim".into(), "x"),
+        );
+        let moved = sync(&other, &music, &keep, &never, &mut |_| {}).unwrap();
+        assert_eq!((moved.removed, moved.downloaded, moved.songs), (0, 1, 1));
+        assert!(sync_dir.join("Bauhaus/Mask/01 One.flac").is_file());
+        assert!(two.is_file());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn sync_stops_for_space_cancel_and_another_account() {
         let root = dir("limits");
         let music = root.join("music");
@@ -1266,8 +1364,33 @@ mod tests {
             &mut |_| {},
         )
         .unwrap();
-        assert_eq!((moved.removed, moved.downloaded), (2, 2));
+        // The same library behind another server: nothing is copied again.
+        assert_eq!((moved.removed, moved.downloaded), (0, 0));
         assert_eq!(load_manifest(&music).username, "kim");
+        // A third with other ids, one song changed and one gone: only those.
+        let third = vec![song("j1", "One", 10), song("j3", "Three", 30)];
+        fake::server(&root, &third, &[]);
+        let jelly = fake::client(
+            &root,
+            Account::subsonic_token("http://jelly:8096".into(), "kim".into(), "x"),
+        );
+        let changed = sync(
+            &jelly,
+            &music,
+            &options(SyncScope::All),
+            &never,
+            &mut |_| {},
+        )
+        .unwrap();
+        assert_eq!(
+            (changed.removed, changed.downloaded, changed.songs),
+            (1, 1, 2)
+        );
+        let sync_dir = folder(&music);
+        assert!(sync_dir.join("Bauhaus/Mask/01 One.flac").is_file());
+        assert!(!sync_dir.join("Bauhaus/Mask/01 Two.flac").exists());
+        assert!(sync_dir.join("Bauhaus/Mask/01 Three.flac").is_file());
+        assert!(load_manifest(&music).songs.contains_key("j1"));
         fs::remove_dir_all(root).unwrap();
     }
 
