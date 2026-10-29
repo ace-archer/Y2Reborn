@@ -930,6 +930,9 @@ pub enum Screen {
     LastFm,
     /// Settings > Storage > Music Server: sign-in, sync and where it goes.
     MusicServer,
+    /// Music Server > Playlists: which of the server's playlists Selected
+    /// Music copies.
+    MusicServerPlaylists,
     /// One playlist; the navigation filter holds its file's path.
     Playlist,
     /// About & Updates > Error Reports; filter "info": what is sent, "save":
@@ -1203,6 +1206,9 @@ pub struct Settings {
     pub music_server_target: music_server::SyncTarget,
     #[serde(default)]
     pub music_server_scope: music_server::SyncScope,
+    /// What Selected Music copies.
+    #[serde(default)]
+    pub music_server_choice: music_server::SyncChoice,
     #[serde(default)]
     pub music_server_quality: music_server::SyncQuality,
     /// Songs and playlists gone from the server (or from what is synced)
@@ -1558,6 +1564,7 @@ impl Default for Settings {
             music_server_auto: false,
             music_server_target: music_server::SyncTarget::Internal,
             music_server_scope: music_server::SyncScope::All,
+            music_server_choice: music_server::SyncChoice::default(),
             music_server_quality: music_server::SyncQuality::Original,
             music_server_keep: false,
             internal_setup_asked: false,
@@ -1834,6 +1841,7 @@ pub enum Effect {
     SetMusicServerAuto(bool),
     SetMusicServerTarget(music_server::SyncTarget),
     SetMusicServerScope(music_server::SyncScope),
+    SetMusicServerChoice(Box<music_server::SyncChoice>),
     SetMusicServerQuality(music_server::SyncQuality),
     SetMusicServerKeep(bool),
     SetCodecPreference(CodecPreference),

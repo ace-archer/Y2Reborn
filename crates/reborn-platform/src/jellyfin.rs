@@ -4,9 +4,7 @@
 //! request after that carries the token in the `Authorization` header (the
 //! legacy `X-Emby-Token` and `api_key` ways are off since Jellyfin 12).
 use crate::lastfm::form_encode;
-use crate::music_server::{
-    list, Account, Auth, Curl, Error, RemotePlaylist, Request, Song, MAX_SONGS,
-};
+use crate::music_server::{list, Account, Auth, Curl, Error, Playlist, Request, Song, MAX_SONGS};
 use reborn_core::music_server::SyncQuality;
 use serde_json::Value;
 use std::path::Path;
@@ -140,6 +138,14 @@ impl Client {
         downloads_allowed(Some(&me))
     }
     pub fn songs(&self, cancel: &AtomicBool) -> Result<Vec<Song>, Error> {
+        self.audio("", cancel)
+    }
+    /// The songs marked favorite by this account.
+    pub fn favorites(&self, cancel: &AtomicBool) -> Result<Vec<Song>, Error> {
+        self.audio("&Filters=IsFavorite", cancel)
+    }
+    /// Every song, `filter` added to the query, in pages.
+    fn audio(&self, filter: &str, cancel: &AtomicBool) -> Result<Vec<Song>, Error> {
         let user = self.user_id();
         let mut songs = vec![];
         let mut start = 0;
@@ -148,7 +154,7 @@ impl Client {
                 return Err(Error::Cancelled);
             }
             let v = self.get(&format!(
-                "/Items?userId={user}&IncludeItemTypes=Audio&Recursive=true\
+                "/Items?userId={user}&IncludeItemTypes=Audio&Recursive=true{filter}\
                  &Fields=MediaSources&SortBy=SortName&EnableImages=false\
                  &EnableUserData=false&StartIndex={start}&Limit={PAGE}"
             ))?;
@@ -161,41 +167,41 @@ impl Client {
             }
         }
     }
-    pub fn playlists(&self, cancel: &AtomicBool) -> Result<Vec<RemotePlaylist>, Error> {
+    pub fn playlist_list(&self) -> Result<Vec<Playlist>, Error> {
         let user = self.user_id();
         let v = self.get(&format!(
-            "/Items?userId={user}&IncludeItemTypes=Playlist&Recursive=true"
+            "/Items?userId={user}&IncludeItemTypes=Playlist&Recursive=true&Fields=ChildCount"
         ))?;
-        let mut out = vec![];
-        for p in list(v.get("Items")) {
-            if cancel.load(Ordering::Relaxed) {
-                return Err(Error::Cancelled);
-            }
+        Ok(list(v.get("Items"))
+            .into_iter()
             // Video playlists hold nothing for the player.
-            if p.get("MediaType").and_then(Value::as_str) == Some("Video") {
-                continue;
-            }
-            let Some(id) = p.get("Id").and_then(Value::as_str) else {
-                continue;
-            };
-            let entries = self.get(&format!(
-                "/Playlists/{}/Items?userId={user}&Fields=MediaSources",
-                form_encode(id)
-            ))?;
-            out.push(RemotePlaylist {
-                id: id.to_owned(),
-                name: p
-                    .get("Name")
-                    .and_then(Value::as_str)
-                    .unwrap_or("Playlist")
-                    .to_owned(),
-                songs: list(entries.get("Items"))
-                    .into_iter()
-                    .filter_map(song)
-                    .collect(),
-            });
-        }
-        Ok(out)
+            .filter(|p| p.get("MediaType").and_then(Value::as_str) != Some("Video"))
+            .filter_map(|p| {
+                Some(Playlist {
+                    id: p.get("Id")?.as_str()?.to_owned(),
+                    name: p
+                        .get("Name")
+                        .and_then(Value::as_str)
+                        .unwrap_or("Playlist")
+                        .to_owned(),
+                    songs: p
+                        .get("ChildCount")
+                        .and_then(Value::as_u64)
+                        .map(|n| n as usize),
+                })
+            })
+            .collect())
+    }
+    pub fn playlist_songs(&self, id: &str) -> Result<Vec<Song>, Error> {
+        let user = self.user_id();
+        let entries = self.get(&format!(
+            "/Playlists/{}/Items?userId={user}&Fields=MediaSources",
+            form_encode(id)
+        ))?;
+        Ok(list(entries.get("Items"))
+            .into_iter()
+            .filter_map(song)
+            .collect())
     }
     pub fn download(
         &self,
@@ -295,7 +301,7 @@ mod tests {
     use crate::music_server::{
         load_manifest, sign_in_with, sync, Client as AnyClient, Options, FOLDER,
     };
-    use reborn_core::music_server::SyncScope;
+    use reborn_core::music_server::{SyncChoice, SyncScope};
     use std::fs;
 
     fn item(id: &str, name: &str, track: u32, path: &str) -> Value {
@@ -321,7 +327,9 @@ mod tests {
             {"Id": "p2", "Name": "Clips", "MediaType": "Video"},
         ]});
         let entries = serde_json::json!({"Items": [item("a2", "Kick in the Eye", 2, "")]});
+        let favorites = serde_json::json!({"Items": [item("a1", "Hollow Hills", 1, "/m/01.flac")]});
         for (file, body) in [
+            ("favorites.json", favorites),
             ("songs.json", songs),
             ("user.json", user),
             ("auth.json", auth),
@@ -342,6 +350,7 @@ mod tests {
                  *AuthenticateByName*) code=401 ;;\n\
                  *Token=*tok3n*) case \"$cfg\" in\n\
                    *Users/Me*) cat {r}/user.json ;;\n\
+                   *IsFavorite*StartIndex=0*) cat {r}/favorites.json ;;\n\
                    *IncludeItemTypes=Audio*StartIndex=0*) cat {r}/songs.json ;;\n\
                    *IncludeItemTypes=Audio*) echo '{{\"Items\":[]}}' ;;\n\
                    *IncludeItemTypes=Playlist*) cat {r}/playlists.json ;;\n\
@@ -381,6 +390,7 @@ mod tests {
         let never = AtomicBool::new(false);
         let options = Options {
             scope: SyncScope::All,
+            choice: SyncChoice::default(),
             quality: SyncQuality::Original,
             keep: false,
             now_unix: 1_800_000_000,
@@ -403,11 +413,32 @@ mod tests {
         fs::remove_dir_all(&music).unwrap();
         let mp3 = Options {
             quality: SyncQuality::Mp3Medium,
-            ..options
+            ..options.clone()
         };
         sync(&client, &music, &mp3, &never, &mut |_| {}).unwrap();
         let asked = fs::read_to_string(root.join("requests")).unwrap();
         assert!(asked.contains("/Audio/a1/stream?container=mp3&audioCodec=mp3&audioBitRate=192000"));
+
+        // Favorites only: the favorite song, no playlist asked for.
+        fs::remove_dir_all(&music).unwrap();
+        fs::remove_file(root.join("requests")).unwrap();
+        let favorites = Options {
+            scope: SyncScope::Selected,
+            choice: SyncChoice {
+                favorites: true,
+                all_playlists: false,
+                ..SyncChoice::default()
+            },
+            ..options
+        };
+        let summary = sync(&client, &music, &favorites, &never, &mut |_| {}).unwrap();
+        assert_eq!(
+            (summary.downloaded, summary.songs, summary.playlists),
+            (1, 1, 0)
+        );
+        assert!(synced.join("Bauhaus/Mask/01 Hollow Hills.flac").is_file());
+        let asked = fs::read_to_string(root.join("requests")).unwrap();
+        assert!(asked.contains("Filters=IsFavorite") && !asked.contains("Playlists/p1/Items"));
         fs::remove_dir_all(&root).unwrap();
     }
 

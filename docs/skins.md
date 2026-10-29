@@ -118,7 +118,7 @@ most specific name first:
 | `page` | pages with a heading or facts (About, Storage, Song Info, …) |
 | `artists`, `albums`, `genres`, `songs`, `folders`, `album`, `artist`, `queue` | one library screen (else `list`) |
 | `cover_flow` | Albums in Cover Flow (only this name; else Reborn's) |
-| `music`, `song_info`, `settings`, `wifi`, `bluetooth`, `computer`, `sound`, `playback`, `crossfade`, `screen_off`, `theme`, `library`, `display`, `service`, `battery`, `sleep`, `storage`, `music_server`, `updates`, `about`, `maintenance`, `diagnostics`, `diagnostic`, `value` | one settings or system screen (else `page` or `list`); `theme` is the Skin picker (Settings → Skin since Beta 7.5; the key keeps its name for existing skins) |
+| `music`, `song_info`, `settings`, `wifi`, `bluetooth`, `computer`, `sound`, `playback`, `crossfade`, `screen_off`, `theme`, `library`, `display`, `service`, `battery`, `sleep`, `storage`, `music_server`, `music_server_playlists`, `updates`, `about`, `maintenance`, `diagnostics`, `diagnostic`, `value` | one settings or system screen (else `page` or `list`); `theme` is the Skin picker (Settings → Skin since Beta 7.5; the key keeps its name for existing skins) |
 | `time_zone` | the time zone picker (else `page` or `list`) |
 | `date_time` | Date & Time, the date and time set by hand (else `page` or `list`) |
 | `search`, `playlists`, `playlist`, `radio`, `radio_stations`, `radio_categories` | search results, Playlists, one playlist, Radio, a station list, countries or genres (else `list`) |
@@ -212,8 +212,8 @@ Inside list rows: `focused`, `disabled`, `toggle`, `on`, `check`, `checked`,
 `back chevron check close play pause prev next play_large pause_large
 prev_large next_large shuffle repeat repeat_one gapless eq normalise bluetooth
 wifi lock bolt folder note speaker headphones sd usb warning info sun drive
-power download refresh search vinyl person crossfade heart palette moon` (`palette` since
-Beta 7.5, `moon` since Beta 8.37), and three that follow
+power download refresh sync search vinyl person crossfade heart palette moon` (`palette` since
+Beta 7.5, `moon` since Beta 8.37, `sync` with music server sync), and three that follow
 the state: `play_pause`, `play_pause_large`, `repeat_mode`.
 
 ## Limits and checks

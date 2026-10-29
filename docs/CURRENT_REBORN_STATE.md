@@ -5,7 +5,9 @@
 - Settings → Storage → Music Server: Jellyfin, or any server speaking the Subsonic API (Navidrome, Gonic, Airsonic,
   Ampache, LMS, …). Sign in with the server's address, username and password (the full-screen keyboard; the address
   decides the API), then Sync Now, Sync Automatically (on Wi-Fi once the last complete sync is 24 h old; retried after
-  30 min), Store On (Internal Storage / SD Card), What to Sync (All Music / Playlists Only), Quality (Original / MP3
+  30 min), Store On (Internal Storage / SD Card), What to Sync (All Music, or Selected Music: Favorite Songs and the playlists chosen
+  under Playlists, a picker of the server's playlists with All Playlists for those made later too; the choice belongs
+  to one account, and Playlists Only from before reads as Selected Music with every playlist), Quality (Original / MP3
   320 / MP3 192 kbit/s through the server's transcoder; an MP3 no larger is kept as it is) and Keep Removed Music (songs
   and playlists gone from the server, from what is synced or with another account stay, no longer the sync's; a song
   copied again in a new form still replaces its file). One-way: the server is the source.
@@ -20,14 +22,16 @@
 - Jellyfin: `POST /Users/AuthenticateByName` with `Authorization: MediaBrowser Client, Device, DeviceId, Version` (the
   token added after sign-in; the legacy `X-Emby-Token`/`api_key` are off by default since Jellyfin 12). An account its
   administrator keeps from downloading (`Policy.EnableContentDownloading`) is refused at sign-in and on each sync.
-  `/Items?IncludeItemTypes=Audio&Fields=MediaSources` in pages of 200; audio playlists through
+  `/Items?IncludeItemTypes=Audio&Fields=MediaSources` in pages of 200 (favorites with `Filters=IsFavorite`); audio
+  playlists listed with `ChildCount`, their songs through
   `/Playlists/{id}/Items`; originals from `/Items/{id}/Download`, MP3 from
   `/Audio/{id}/stream?container=mp3&audioCodec=mp3&audioBitRate=…`. The file type comes from the media source's path,
   else its container (`mov,mp4,m4a,…` is .m4a).
 - Subsonic: asks for API 1.13.0 (the first with token auth, so older servers answer); token auth `md5(password + salt)`.
   A server refusing tokens (41/42) that lists OpenSubsonic's `apiKeyAuthentication` is asked again with the password
   field as its `apiKey` (sent without `u`; 44 is a wrong key). `search3` with an empty query pages the library, and a
-  server that refuses it or finds nothing is walked with `getAlbumList2`/`getAlbum`; `getPlaylists`/`getPlaylist`,
+  server that refuses it or finds nothing is walked with `getAlbumList2`/`getAlbum`; `getPlaylists`/`getPlaylist` (only the
+  chosen ones' songs), `getStarred2` for favorites,
   `download` or `stream?format=mp3`.
 - Everything synced lives in `Music Server/` on the chosen storage: `Artist/Album/NN Title.ext` (FAT-safe names) and
   `Playlists/<name>.m3u8` with relative entries (a server playlist named Favorites is written as `Favorites (Server)`,
@@ -44,12 +48,12 @@
   The page's refusals (Connect to Wi-Fi first, Insert a working SD card first, …) show as written, not as
   `friendly_error`'s "Couldn't complete that"; Settings → Last.fm's refusals (Connect to Wi-Fi first, This build has no
   Last.fm key, …) likewise.
-- While a sync runs, the status bar shows the refresh arrows in the accent to the left of Wi-Fi, on every screen.
+- While a sync runs, the status bar shows the sync arrows (icon `sync`) in the accent to the left of Wi-Fi, on every screen.
 - A sync keeps the player awake and Wi-Fi up (`automatic_sleep_tick`, `wifi_idle_tick` count it as work), stops when a
   computer opens the drives or the chosen card goes away, and asks for a quick library scan when it changed anything.
   Wrong login on a sync forgets the account. Disconnect and Reset Settings forget the account; synced music stays.
 - Storage's rows shrink from 44 px to fit (Scan, Music Server and the occasional computer, setup and repair rows). Skin
-  layout name `music_server`. Previews 97–97c. A Navidrome sync has run on a player; Jellyfin and OpenSubsonic API keys are host-tested only.
+  layout names `music_server`, `music_server_playlists` (Server Playlists). Previews 97–97e. A Navidrome sync has run on a player; Jellyfin and OpenSubsonic API keys are host-tested only.
 
 ## 1.0.0-beta.8.43 — Y2Linux 1.0 Beta 8.43 (Baseline 164), 2026-10-28 (latest): issue fixes
 

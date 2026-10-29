@@ -17,7 +17,7 @@
 //! ever replaced or removed; the server is the source, so a synced playlist
 //! changed on the player is written over by the next sync.
 use crate::{jellyfin, subsonic};
-use reborn_core::music_server::{SyncQuality, SyncScope};
+use reborn_core::music_server::{SyncChoice, SyncQuality, SyncScope};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -319,6 +319,15 @@ pub fn name_part(text: &str) -> String {
     }
 }
 
+/// A playlist as the server lists it, for choosing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Playlist {
+    pub id: String,
+    pub name: String,
+    /// How many songs, when the server says.
+    pub songs: Option<usize>,
+}
+
 /// A playlist on the server, with its songs in order.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RemotePlaylist {
@@ -532,12 +541,45 @@ impl Client {
             Self::Jellyfin(c) => c.songs(cancel),
         }
     }
-    /// Every playlist the account sees, with its songs.
-    pub fn playlists(&self, cancel: &AtomicBool) -> Result<Vec<RemotePlaylist>, Error> {
+    /// The songs the account marked favorite.
+    pub fn favorites(&self, cancel: &AtomicBool) -> Result<Vec<Song>, Error> {
         match self {
-            Self::Subsonic(c) => c.playlists(cancel),
-            Self::Jellyfin(c) => c.playlists(cancel),
+            Self::Subsonic(c) => c.favorites(),
+            Self::Jellyfin(c) => c.favorites(cancel),
         }
+    }
+    /// Every playlist the account sees, without its songs.
+    pub fn playlist_list(&self) -> Result<Vec<Playlist>, Error> {
+        match self {
+            Self::Subsonic(c) => c.playlist_list(),
+            Self::Jellyfin(c) => c.playlist_list(),
+        }
+    }
+    /// The playlists `pick` takes, with their songs.
+    pub fn playlists(
+        &self,
+        cancel: &AtomicBool,
+        pick: impl Fn(&str) -> bool,
+    ) -> Result<Vec<RemotePlaylist>, Error> {
+        let mut out = vec![];
+        for p in self.playlist_list()? {
+            if !pick(&p.id) {
+                continue;
+            }
+            if cancel.load(Ordering::Relaxed) {
+                return Err(Error::Cancelled);
+            }
+            let songs = match self {
+                Self::Subsonic(c) => c.playlist_songs(&p.id)?,
+                Self::Jellyfin(c) => c.playlist_songs(&p.id)?,
+            };
+            out.push(RemotePlaylist {
+                id: p.id,
+                name: p.name,
+                songs,
+            });
+        }
+        Ok(out)
     }
     /// One song into `to`, as `quality` asks.
     pub fn download(
@@ -617,9 +659,11 @@ pub(crate) fn save_manifest(root: &Path, manifest: &Manifest) -> Result<(), Erro
 
 // ------------------------------------------------------------------ sync
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Options {
     pub scope: SyncScope,
+    /// What Selected Music copies.
+    pub choice: SyncChoice,
     pub quality: SyncQuality,
     /// Songs and playlists no longer wanted stay, forgotten rather than
     /// removed (a song copied again in a new form still replaces its file).
@@ -664,17 +708,24 @@ pub fn sync(
     let dir = folder(root);
     fs::create_dir_all(&dir).map_err(storage)?;
     client.ping()?;
-    let playlists = client.playlists(cancel)?;
-    let wanted: Vec<Song> = match options.scope {
-        SyncScope::All => client.songs(cancel)?,
-        SyncScope::Playlists => {
+    let (playlists, wanted) = match options.scope {
+        SyncScope::All => (client.playlists(cancel, |_| true)?, client.songs(cancel)?),
+        SyncScope::Selected => {
+            let choice = &options.choice;
+            let playlists = client.playlists(cancel, |id| choice.includes(id))?;
+            let favorites = if choice.favorites {
+                client.favorites(cancel)?
+            } else {
+                vec![]
+            };
             let mut seen = HashSet::new();
-            playlists
+            let wanted: Vec<Song> = favorites
                 .iter()
-                .flat_map(|p| &p.songs)
+                .chain(playlists.iter().flat_map(|p| &p.songs))
                 .filter(|s| seen.insert(s.id.clone()))
                 .cloned()
-                .collect()
+                .collect();
+            (playlists, wanted)
         }
     };
     let mut manifest = load_manifest(root);
@@ -1111,6 +1162,7 @@ mod tests {
     fn options(scope: SyncScope) -> Options {
         Options {
             scope,
+            choice: SyncChoice::default(),
             quality: SyncQuality::Original,
             keep: false,
             now_unix: 1_800_000_000,
@@ -1203,7 +1255,7 @@ mod tests {
         let third = sync(
             &client,
             &music,
-            &options(SyncScope::Playlists),
+            &options(SyncScope::Selected),
             &never,
             &mut |_| {},
         )
@@ -1252,6 +1304,53 @@ mod tests {
         assert!(sync_dir
             .join("Bauhaus/Mask/01 Kick in the Eye.flac")
             .is_file());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn selected_music_copies_favorites_and_the_chosen_playlists() {
+        let root = dir("selected");
+        let music = root.join("music");
+        let songs = vec![
+            song("s1", "One", 10),
+            song("s2", "Two", 20),
+            song("s3", "Three", 30),
+        ];
+        let client = fake::server(&root, &songs, &["s2"]);
+        let starred = fake::ok(serde_json::json!({"starred2": {"song": [
+            {"id": "s3", "title": "Three", "album": "Mask", "artist": "Bauhaus",
+             "track": 1, "suffix": "flac", "size": 30, "duration": 200}
+        ]}}));
+        fs::write(root.join("starred.json"), starred).unwrap();
+        let never = AtomicBool::new(false);
+        let mut chosen = Options {
+            choice: SyncChoice {
+                favorites: true,
+                all_playlists: false,
+                playlists: ["p1".to_owned()].into(),
+                ..SyncChoice::default()
+            },
+            ..options(SyncScope::Selected)
+        };
+        let summary = sync(&client, &music, &chosen, &never, &mut |_| {}).unwrap();
+        assert_eq!(
+            (summary.downloaded, summary.songs, summary.playlists),
+            (2, 2, 1)
+        );
+        let sync_dir = folder(&music);
+        assert!(sync_dir.join("Bauhaus/Mask/01 Two.flac").is_file());
+        assert!(sync_dir.join("Bauhaus/Mask/01 Three.flac").is_file());
+        assert!(sync_dir.join("Playlists/Road_Trip.m3u8").is_file());
+        assert!(!sync_dir.join("Playlists/favorites (Server).m3u8").exists());
+        // Only the chosen playlist's songs were asked for.
+        let requests = fs::read_to_string(root.join("requests")).unwrap();
+        assert_eq!(requests.matches("rest/getPlaylist?").count(), 1);
+        assert!(requests.contains("id=p1"));
+        // Favorites off: their song goes, the playlist's stays.
+        chosen.choice.favorites = false;
+        let after = sync(&client, &music, &chosen, &never, &mut |_| {}).unwrap();
+        assert_eq!((after.removed, after.songs), (1, 1));
+        assert!(!sync_dir.join("Bauhaus/Mask/01 Three.flac").exists());
         fs::remove_dir_all(root).unwrap();
     }
 

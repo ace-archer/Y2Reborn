@@ -4459,7 +4459,7 @@ fn music_server_page_syncs_and_steps_its_choices() {
     );
     assert_eq!(
         select_key(&mut ui, &mut m, "music_server_scope"),
-        Effect::SetMusicServerScope(SyncScope::Playlists)
+        Effect::SetMusicServerScope(SyncScope::Selected)
     );
     assert_eq!(
         select_key(&mut ui, &mut m, "music_server_quality"),
@@ -4489,6 +4489,101 @@ fn music_server_page_syncs_and_steps_its_choices() {
     );
     m.screen = Screen::Storage;
     assert_eq!(music_server_row(&ui, &m).secondary, "Syncing 12 of 300");
+}
+
+#[test]
+fn selected_music_chooses_favorites_and_playlists() {
+    use crate::{MusicServerView, ServerPlaylist};
+    use reborn_core::music_server::{MusicServerRequest, SyncChoice, SyncScope};
+    let mut ui = radios();
+    let mut m = app(Screen::MusicServer);
+    ui.music_server = MusicServerView {
+        account: Some(("luca".into(), "music.example.com".into())),
+        ..Default::default()
+    };
+    let keys = |ui: &Ui, m: &AppModel| -> Vec<String> {
+        ui.rows(m, &[]).into_iter().map(|r| r.key).collect()
+    };
+    assert!(!keys(&ui, &m).contains(&"music_server_favorites".to_owned()));
+    m.settings.music_server_scope = SyncScope::Selected;
+    let rows = ui.rows(&m, &[]);
+    let at = rows
+        .iter()
+        .position(|r| r.key == "music_server_scope")
+        .unwrap();
+    assert_eq!(rows[at].secondary, "Selected Music");
+    assert_eq!(rows[at + 1].key, "music_server_favorites");
+    assert_eq!(
+        (rows[at + 2].key.as_str(), rows[at + 2].secondary.as_str()),
+        ("music_server_playlists", "All")
+    );
+    let Effect::SetMusicServerChoice(choice) =
+        select_key(&mut ui, &mut m, "music_server_favorites")
+    else {
+        panic!()
+    };
+    assert!(choice.favorites);
+    // Playlists opens the picker and asks the server.
+    assert_eq!(
+        select_key(&mut ui, &mut m, "music_server_playlists"),
+        Effect::MusicServer(MusicServerRequest::ListPlaylists)
+    );
+    assert_eq!(m.screen, Screen::MusicServerPlaylists);
+    ui.music_server.playlists.loading = true;
+    assert!(visible_text(&ui, &m).contains("Loading Playlists"));
+    ui.music_server.playlists.loading = false;
+    ui.music_server.playlists.list = vec![
+        ServerPlaylist {
+            id: "p1".into(),
+            name: "Road Trip".into(),
+            songs: Some(12),
+        },
+        ServerPlaylist {
+            id: "p2".into(),
+            name: "Gym".into(),
+            songs: None,
+        },
+    ];
+    let rows = ui.rows(&m, &[]);
+    assert_eq!(rows[0].kind, RowKind::Toggle(true));
+    assert_eq!(
+        (rows[1].label.as_str(), rows[1].secondary.as_str()),
+        ("Road Trip", "12 songs")
+    );
+    assert!(rows[1..].iter().all(|r| r.kind == RowKind::Check(true)));
+    // Leaving one out of All Playlists keeps the other.
+    let Effect::SetMusicServerChoice(choice) = select_key(&mut ui, &mut m, "server_playlist:0")
+    else {
+        panic!()
+    };
+    assert!(!choice.all_playlists && !choice.includes("p1") && choice.includes("p2"));
+    m.settings.music_server_choice = *choice;
+    let rows = ui.rows(&m, &[]);
+    assert_eq!(
+        (rows[1].kind, rows[2].kind),
+        (RowKind::Check(false), RowKind::Check(true))
+    );
+    let Effect::SetMusicServerChoice(choice) =
+        select_key(&mut ui, &mut m, "music_server_all_playlists")
+    else {
+        panic!()
+    };
+    assert_eq!(*choice, SyncChoice::default());
+    // A server that can't be asked offers to try again.
+    ui.music_server.playlists.error = Some("The server can't be reached".into());
+    assert!(visible_text(&ui, &m).contains("Couldn't Load Playlists"));
+    assert_eq!(
+        select_key(&mut ui, &mut m, "music_server_playlists_retry"),
+        Effect::MusicServer(MusicServerRequest::ListPlaylists)
+    );
+    // Back on the page, a chosen pair reads as such.
+    m.screen = Screen::MusicServer;
+    m.settings.music_server_choice.all_playlists = false;
+    m.settings.music_server_choice.playlists = ["p1".to_owned(), "p2".to_owned()].into();
+    let rows = ui.rows(&m, &[]);
+    assert!(rows
+        .iter()
+        .any(|r| r.key == "music_server_playlists" && r.secondary == "2 playlists"));
 }
 
 #[test]

@@ -2603,6 +2603,10 @@ impl Runtime {
                 self.model.settings.music_server_scope = scope;
                 self.checkpoint();
             }
+            Effect::SetMusicServerChoice(choice) => {
+                self.music_server_set_choice(*choice);
+                self.checkpoint();
+            }
             Effect::SetMusicServerQuality(quality) => {
                 self.model.settings.music_server_quality = quality;
                 self.checkpoint();

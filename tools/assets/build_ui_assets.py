@@ -450,6 +450,17 @@ def ic_refresh(p):
     arrow(p, (22.6, 5.6), (1, 0.4), 4.2)
 
 
+def ic_sync(p):
+    """Two arcs chasing each other round (a sync running); clear at 16-22 px."""
+    for a0 in (165, 345):
+        a1 = a0 + 120
+        p.arc(16, 16, 9.5, a0, a1, 2.6)
+        t = math.radians(a1)
+        d = (-math.sin(t), math.cos(t))
+        end = (16 + 9.5 * math.cos(t), 16 + 9.5 * math.sin(t))
+        arrow(p, (end[0] + d[0] * 3, end[1] + d[1] * 3), d, 4)
+
+
 def ic_search(p):
     p.ellipse(14, 14, 8.5, outline=True, width=2.6)
     p.line([(20.5, 20.5), (27, 27)], 3.0)
@@ -597,7 +608,7 @@ ICONS = [
     ('folder', 32, ic_folder), ('note', 32, ic_note), ('speaker', 32, ic_speaker),
     ('headphones', 32, ic_headphones), ('sd', 32, ic_sd), ('usb', 32, ic_usb), ('warning', 32, ic_warning),
     ('info', 32, ic_info), ('sun', 32, ic_sun), ('drive', 32, ic_drive), ('power', 32, ic_power),
-    ('download', 32, ic_download), ('refresh', 32, ic_refresh), ('search', 32, ic_search),
+    ('download', 32, ic_download), ('refresh', 32, ic_refresh), ('sync', 32, ic_sync), ('search', 32, ic_search),
     ('vinyl', 32, ic_disc), ('person', 32, ic_person), ('crossfade', 32, ic_crossfade),
     ('shift', 32, ic_shift), ('shift_on', 32, ic_shift_on), ('backspace', 32, ic_backspace),
     ('eye', 32, ic_eye), ('eye_off', 32, ic_eye_off),

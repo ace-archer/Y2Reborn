@@ -5,7 +5,7 @@
 //! in through LDAP); the key is typed where the password goes.
 use crate::lastfm::form_encode;
 use crate::music_server::{
-    list, storage, Account, Auth, Curl, Error, RemotePlaylist, Request, Song, MAX_SONGS,
+    list, storage, Account, Auth, Curl, Error, Playlist, Request, Song, MAX_SONGS,
 };
 use reborn_core::music_server::SyncQuality;
 use serde_json::Value;
@@ -181,32 +181,40 @@ impl Client {
             }
         }
     }
-    pub fn playlists(&self, cancel: &AtomicBool) -> Result<Vec<RemotePlaylist>, Error> {
+    pub fn playlist_list(&self) -> Result<Vec<Playlist>, Error> {
         let v = self.call("getPlaylists", &[])?;
-        let mut out = vec![];
-        for p in list(v.get("playlists").and_then(|p| p.get("playlist"))) {
-            if cancel.load(Ordering::Relaxed) {
-                return Err(Error::Cancelled);
-            }
-            let Some(id) = p.get("id").and_then(Value::as_str) else {
-                continue;
-            };
-            let full = self.call("getPlaylist", &[("id", id)])?;
-            let full = full.get("playlist");
-            out.push(RemotePlaylist {
-                id: id.to_owned(),
-                name: p
-                    .get("name")
-                    .and_then(Value::as_str)
-                    .unwrap_or("Playlist")
-                    .to_owned(),
-                songs: list(full.and_then(|f| f.get("entry")))
-                    .into_iter()
-                    .filter_map(song)
-                    .collect(),
-            });
-        }
-        Ok(out)
+        Ok(list(v.get("playlists").and_then(|p| p.get("playlist")))
+            .into_iter()
+            .filter_map(|p| {
+                Some(Playlist {
+                    id: p.get("id")?.as_str()?.to_owned(),
+                    name: p
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .unwrap_or("Playlist")
+                        .to_owned(),
+                    songs: p
+                        .get("songCount")
+                        .and_then(Value::as_u64)
+                        .map(|n| n as usize),
+                })
+            })
+            .collect())
+    }
+    pub fn playlist_songs(&self, id: &str) -> Result<Vec<Song>, Error> {
+        let v = self.call("getPlaylist", &[("id", id)])?;
+        Ok(list(v.get("playlist").and_then(|f| f.get("entry")))
+            .into_iter()
+            .filter_map(song)
+            .collect())
+    }
+    /// The songs starred (albums and artists starred are not songs).
+    pub fn favorites(&self) -> Result<Vec<Song>, Error> {
+        let v = self.call("getStarred2", &[])?;
+        Ok(list(v.get("starred2").and_then(|s| s.get("song")))
+            .into_iter()
+            .filter_map(song)
+            .collect())
     }
     pub fn download(
         &self,
@@ -356,6 +364,7 @@ pub(crate) mod fake {
                 "playlist.json",
                 ok(serde_json::json!({"playlist": {"id": "p1", "entry": in_list}})),
             ),
+            ("starred.json", ok(serde_json::json!({"starred2": {}}))),
         ] {
             fs::write(root.join(file), body).unwrap();
         }
@@ -383,6 +392,7 @@ pub(crate) mod fake {
             "*rest/ping*) cat {r}/ping.json ;;\n\
              *rest/getPlaylists*) cat {r}/playlists.json ;;\n\
              *rest/getPlaylist\\?*) cat {r}/playlist.json ;;\n\
+             *rest/getStarred2*) cat {r}/starred.json ;;\n\
              *rest/search3*songOffset=0*) cat {r}/songs.json ;;\n\
              *rest/search3*) echo '{{\"subsonic-response\":{{\"status\":\"ok\"}}}}' ;;\n\
              *rest/getAlbumList2*offset=0*) cat {r}/albums.json ;;\n\

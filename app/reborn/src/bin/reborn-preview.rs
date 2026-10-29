@@ -1699,6 +1699,52 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     );
     case!(
+        "97d-music_server-selected",
+        at(Screen::MusicServer, ""),
+        |ui, m| {
+            ui.music_server = reborn_ui::MusicServerView {
+                account: Some(("luca".into(), "music.example.com".into())),
+                last: Some((312, 3)),
+                ..Default::default()
+            };
+            m.settings.music_server_scope = reborn_core::music_server::SyncScope::Selected;
+            m.settings.music_server_choice.favorites = true;
+            m.settings.music_server_choice.all_playlists = false;
+            m.settings.music_server_choice.playlists = ["p1".to_owned(), "p3".to_owned()].into();
+            m.navigation.focus = 6;
+        }
+    );
+    case!(
+        "97e-music_server-playlists",
+        at(Screen::MusicServerPlaylists, ""),
+        |ui, m| {
+            let list = [
+                ("p1", "Road Trip", Some(48)),
+                ("p2", "Gym", Some(112)),
+                ("p3", "Sunday Morning", Some(23)),
+                ("p4", "Late Night Jazz, Mostly Piano and Brushes", None),
+            ];
+            ui.music_server = reborn_ui::MusicServerView {
+                account: Some(("luca".into(), "music.example.com".into())),
+                playlists: reborn_ui::MusicServerPlaylists {
+                    list: list
+                        .iter()
+                        .map(|(id, name, songs)| reborn_ui::ServerPlaylist {
+                            id: (*id).into(),
+                            name: (*name).into(),
+                            songs: *songs,
+                        })
+                        .collect(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            m.settings.music_server_choice.all_playlists = false;
+            m.settings.music_server_choice.playlists = ["p1".to_owned(), "p3".to_owned()].into();
+            m.navigation.focus = 1;
+        }
+    );
+    case!(
         "65b-radio-tuning-in",
         at(Screen::NowPlaying, ""),
         move |ui, m| {

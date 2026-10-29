@@ -8,7 +8,7 @@
 //! the chosen storage goes away, and the library is scanned once it changed
 //! anything. No secret is ever logged.
 use crate::Runtime;
-use reborn_core::music_server::{MusicServerRequest, SyncTarget};
+use reborn_core::music_server::{MusicServerRequest, SyncChoice, SyncScope, SyncTarget};
 use reborn_core::platform::{SdCard, UsbTransfer};
 use reborn_core::{Event, MediaSource};
 use reborn_observability::Level;
@@ -33,6 +33,8 @@ pub enum Reply {
     Progress(api::Progress),
     /// The sync's outcome, and whether it was the automatic one.
     Done(Result<api::Summary, api::Error>, bool),
+    /// The server's playlists, for choosing.
+    Playlists(Result<Vec<api::Playlist>, api::Error>),
 }
 
 struct Running {
@@ -54,6 +56,8 @@ pub struct MusicServer {
     last: Option<(usize, usize)>,
     /// The library is scanned once the scan running now has finished.
     scan_wanted: bool,
+    /// Music Server > Playlists as last asked of the server.
+    playlists: reborn_ui::MusicServerPlaylists,
     next_auto: Instant,
     replies: (Sender<Reply>, Receiver<Reply>),
 }
@@ -69,6 +73,7 @@ impl MusicServer {
             synced_at: 0,
             last: None,
             scan_wanted: false,
+            playlists: reborn_ui::MusicServerPlaylists::default(),
             // Not in the first minute: Wi-Fi, the clock and the card settle.
             next_auto: Instant::now() + Duration::from_secs(60),
             replies: channel(),
@@ -153,6 +158,7 @@ impl Runtime {
                 .map(|r| (r.progress.done, r.progress.total)),
             last: n.last,
             target_missing: n.known_root.is_none(),
+            playlists: n.playlists.clone(),
         };
         if view != self.ui.music_server {
             self.ui.music_server = view;
@@ -213,6 +219,10 @@ impl Runtime {
                 self.ui.flash("Disconnected from the server");
                 Ok(())
             }
+            MusicServerRequest::ListPlaylists => {
+                self.music_server_list_playlists();
+                Ok(())
+            }
         };
         self.music_server_view();
         result
@@ -235,7 +245,43 @@ impl Runtime {
         }
         self.music_server.account = None;
         self.music_server.known_root = None;
+        self.music_server.playlists = reborn_ui::MusicServerPlaylists::default();
         self.music_server_view();
+    }
+    /// What Selected Music copies, for the account signed in.
+    fn music_server_choice(&self) -> Option<SyncChoice> {
+        let a = self.music_server.account.as_ref()?;
+        let key = SyncChoice::account_key(&a.server, &a.username);
+        Some(self.model.settings.music_server_choice.for_account(&key))
+    }
+    /// Settings: a choice made on the page, for the account signed in.
+    pub(crate) fn music_server_set_choice(&mut self, mut choice: SyncChoice) {
+        if let Some(a) = &self.music_server.account {
+            choice.account = SyncChoice::account_key(&a.server, &a.username);
+        }
+        self.model.settings.music_server_choice = choice;
+    }
+    /// Ask the server for its playlists (the page shows them loading, then
+    /// the list or why not).
+    fn music_server_list_playlists(&mut self) {
+        let lists = &mut self.music_server.playlists;
+        if lists.loading {
+            return;
+        }
+        let Some(account) = self.music_server.account.clone() else {
+            return;
+        };
+        if !self.music_server_online() {
+            self.music_server.playlists.error = Some("Connect to Wi-Fi first".into());
+            return;
+        }
+        let started = self.music_server_spawn("server-lists", move |tx| {
+            let listed = api::Client::new(account).playlist_list();
+            let _ = tx.send(Reply::Playlists(listed));
+        });
+        let lists = &mut self.music_server.playlists;
+        lists.loading = started;
+        lists.error = (!started).then(|| "Couldn't ask the server".to_owned());
     }
     fn music_server_start(&mut self, automatic: bool) -> Result<(), String> {
         if self.music_server.running.is_some() {
@@ -259,8 +305,14 @@ impl Runtime {
         if account.server.starts_with("https") && now_unix.is_none() {
             return Err("The clock isn't set yet; try again in a moment".into());
         }
+        let choice = self.music_server_choice().unwrap_or_default();
+        let scope = self.model.settings.music_server_scope;
+        if scope == SyncScope::Selected && choice.is_empty() {
+            return Err("Choose favorites or playlists to sync first".into());
+        }
         let options = api::Options {
-            scope: self.model.settings.music_server_scope,
+            scope,
+            choice,
             quality: self.model.settings.music_server_quality,
             keep: self.model.settings.music_server_keep,
             now_unix: now_unix.unwrap_or(0),
@@ -399,11 +451,35 @@ impl Runtime {
                                     "kind": account.kind(),
                                 }),
                             );
+                            let key = SyncChoice::account_key(&account.server, &account.username);
+                            let choice = &mut self.model.settings.music_server_choice;
+                            *choice = choice.for_account(&key);
+                            self.checkpoint();
                             self.music_server.account = Some(account);
                             self.music_server.known_root = None;
+                            self.music_server.playlists =
+                                reborn_ui::MusicServerPlaylists::default();
                         }
                     }
                     Err(e) => self.ui.flash(e.message()),
+                }
+            }
+            Reply::Playlists(result) => {
+                let lists = &mut self.music_server.playlists;
+                lists.loading = false;
+                match result {
+                    Ok(found) => {
+                        lists.error = None;
+                        lists.list = found
+                            .into_iter()
+                            .map(|p| reborn_ui::ServerPlaylist {
+                                id: p.id,
+                                name: p.name,
+                                songs: p.songs,
+                            })
+                            .collect();
+                    }
+                    Err(e) => lists.error = Some(e.message()),
                 }
             }
             Reply::Progress(p) => {

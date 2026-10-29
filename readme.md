@@ -43,7 +43,7 @@ through ALSA (wired) or BlueALSA (Bluetooth), and keeps its library in SQLite.
   [Last.fm scrobbling](https://github.com/SchulzCode/Y2Linux/blob/main/docs/LASTFM.md).
 - **Music server sync** (Settings → Storage → Music Server): sign in to Jellyfin or a server that speaks the
   Subsonic API (Navidrome, Gonic, Airsonic, Ampache, LMS and others; OpenSubsonic API keys too) and copy
-  your library, or only the songs of your playlists, and your playlists to Internal Storage or the SD card over Wi-Fi.
+  your library, or only your favorite songs and the playlists you choose, and your playlists to Internal Storage or the SD card over Wi-Fi.
   Sync Now or automatically once a day on Wi-Fi; originals or MP3 made by the server; optionally keep what the server
   removes. Everything goes into a
   `Music Server` folder and only what the sync put there is ever changed or removed; the password is never stored (only

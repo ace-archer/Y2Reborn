@@ -192,7 +192,7 @@ pub(crate) fn status_cluster(c: &mut Canvas, ui: &Ui, m: &AppModel, tint: u32, r
     // A music server sync is running (on any screen).
     if ui.music_server.running.is_some() {
         c.icon(
-            Icon::Refresh,
+            Icon::Sync,
             right - step / 2. + 3.,
             18.,
             radio,

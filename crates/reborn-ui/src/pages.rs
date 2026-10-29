@@ -193,6 +193,7 @@ pub fn page(ui: &Ui, m: &AppModel, tracks: &[Track]) -> Page {
         Screen::SettingsAudio => sound(ui, m),
         Screen::LastFm => lastfm(ui, m),
         Screen::MusicServer => music_server(ui, m),
+        Screen::MusicServerPlaylists => server_playlists(ui, m),
         Screen::Equalizer => equalizer(ui, m),
         Screen::Crossfade => crossfade(m),
         Screen::Balance => balance(m),
@@ -471,7 +472,28 @@ fn music_server(ui: &Ui, m: &AppModel) -> Page {
         ),
     };
     let target = s.music_server_target.label();
-    Page::rows(vec![
+    // Selected Music: what it copies, under What to Sync.
+    let choice = &s.music_server_choice;
+    let selected = (s.music_server_scope == reborn_core::music_server::SyncScope::Selected)
+        .then(|| {
+            [
+                row("Favorite Songs", "music_server_favorites", "")
+                    .with_kind(RowKind::Toggle(choice.favorites)),
+                row(
+                    "Playlists",
+                    "music_server_playlists",
+                    match choice.playlists.len() {
+                        _ if choice.all_playlists => "All".into(),
+                        0 => "None".into(),
+                        n => crate::components::count(n, "playlist", "playlists"),
+                    },
+                )
+                .with_kind(RowKind::Chevron),
+            ]
+        })
+        .into_iter()
+        .flatten();
+    let rows = vec![
         row(
             "Account",
             "music_server_account",
@@ -494,6 +516,8 @@ fn music_server(ui: &Ui, m: &AppModel) -> Page {
             "music_server_scope",
             s.music_server_scope.label(),
         ),
+    ];
+    let rest = vec![
         row(
             "Quality",
             "music_server_quality",
@@ -502,7 +526,52 @@ fn music_server(ui: &Ui, m: &AppModel) -> Page {
         row("Keep Removed Music", "music_server_keep", "")
             .with_kind(RowKind::Toggle(s.music_server_keep)),
         row("Disconnect", "music_server_disconnect", ""),
-    ])
+    ];
+    Page::rows(rows.into_iter().chain(selected).chain(rest).collect())
+}
+
+/// Music Server > Playlists: the server's playlists, each in or out of
+/// Selected Music; All Playlists takes those made later too.
+fn server_playlists(ui: &Ui, m: &AppModel) -> Page {
+    let lists = &ui.music_server.playlists;
+    let choice = &m.settings.music_server_choice;
+    if lists.loading {
+        return Page::hero("Loading Playlists…", "Asking the server.");
+    }
+    if let Some(error) = &lists.error {
+        return Page::hero("Couldn't Load Playlists", error).with_rows(vec![row(
+            "Try Again",
+            "music_server_playlists_retry",
+            "",
+        )]);
+    }
+    let all = row(
+        "All Playlists",
+        "music_server_all_playlists",
+        "Including new ones",
+    )
+    .with_kind(RowKind::Toggle(choice.all_playlists));
+    if lists.list.is_empty() {
+        return Page::hero(
+            "No Playlists",
+            "This account has no playlists on the server.",
+        )
+        .with_rows(vec![all]);
+    }
+    Page::rows(
+        std::iter::once(all)
+            .chain(lists.list.iter().enumerate().map(|(i, p)| {
+                row(
+                    &p.name,
+                    &format!("server_playlist:{i}"),
+                    p.songs
+                        .map(|n| crate::components::count(n, "song", "songs"))
+                        .unwrap_or_default(),
+                )
+                .with_kind(RowKind::Check(choice.includes(&p.id)))
+            }))
+            .collect(),
+    )
 }
 
 /// Names of the equalizer presets and their gains (dB) per band

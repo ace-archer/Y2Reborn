@@ -311,6 +311,7 @@ pub(crate) const ICONS: &[(&str, Icon)] = &[
     ("power", Icon::Power),
     ("download", Icon::Download),
     ("refresh", Icon::Refresh),
+    ("sync", Icon::Sync),
     ("search", Icon::Search),
     ("vinyl", Icon::Vinyl),
     ("person", Icon::Person),

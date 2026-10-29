@@ -295,6 +295,24 @@ pub struct MusicServerView {
     pub last: Option<(usize, usize)>,
     /// The chosen storage is not there (no SD card).
     pub target_missing: bool,
+    /// Music Server > Playlists.
+    pub playlists: MusicServerPlaylists,
+}
+
+/// The server's playlists as last asked for (Music Server > Playlists).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MusicServerPlaylists {
+    pub loading: bool,
+    pub error: Option<String>,
+    pub list: Vec<ServerPlaylist>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ServerPlaylist {
+    pub id: String,
+    pub name: String,
+    /// How many songs, when the server says.
+    pub songs: Option<usize>,
 }
 
 /// Internet radio lists as the player last received them.
@@ -2517,11 +2535,14 @@ impl Ui {
                 m.navigation.focus =
                     (m.settings.balance + reborn_core::MAX_BALANCE).max(0) as usize;
             }
-            // The picker lists what is installed now (skins arrive over MTP).
-            return if screen == Screen::Theme {
-                Effect::ScanThemes
-            } else {
-                Effect::None
+            // The picker lists what is installed now (skins arrive over MTP);
+            // the server's playlists are asked for each time.
+            return match screen {
+                Screen::Theme => Effect::ScanThemes,
+                Screen::MusicServerPlaylists => {
+                    Effect::MusicServer(MusicServerRequest::ListPlaylists)
+                }
+                _ => Effect::None,
             };
         }
         if let Some(effect) = self.setting(m, key) {
@@ -2828,6 +2849,33 @@ impl Ui {
                 Effect::SetMusicServerQuality(m.settings.music_server_quality.next())
             }
             "music_server_keep" => Effect::SetMusicServerKeep(!m.settings.music_server_keep),
+            "music_server_favorites" => {
+                let mut choice = m.settings.music_server_choice.clone();
+                choice.favorites = !choice.favorites;
+                Effect::SetMusicServerChoice(Box::new(choice))
+            }
+            "music_server_all_playlists" => {
+                let mut choice = m.settings.music_server_choice.clone();
+                choice.toggle_all();
+                Effect::SetMusicServerChoice(Box::new(choice))
+            }
+            "music_server_playlists_retry" => {
+                Effect::MusicServer(MusicServerRequest::ListPlaylists)
+            }
+            _ if key.starts_with("server_playlist:") => {
+                let listed = &self.music_server.playlists.list;
+                let Some(p) = key
+                    .strip_prefix("server_playlist:")
+                    .and_then(|i| i.parse::<usize>().ok())
+                    .and_then(|i| listed.get(i))
+                else {
+                    return Some(Effect::None);
+                };
+                let ids: Vec<&str> = listed.iter().map(|p| p.id.as_str()).collect();
+                let mut choice = m.settings.music_server_choice.clone();
+                choice.toggle(&p.id, &ids);
+                Effect::SetMusicServerChoice(Box::new(choice))
+            }
             "wrap_around" => Effect::SetWrapAround(m.settings.wrap_around.next()),
             "home_audiobooks" => Effect::SetAudiobooksOnHome(!m.settings.audiobooks_on_home),
             "screen_off_buttons" => {
@@ -4119,6 +4167,7 @@ fn route(key: &str) -> Option<Screen> {
         "radio" => Screen::Radio,
         "lastfm" => Screen::LastFm,
         "music_server" => Screen::MusicServer,
+        "music_server_playlists" => Screen::MusicServerPlaylists,
         "error_reports" => Screen::ErrorReports,
         _ => return None,
     })
