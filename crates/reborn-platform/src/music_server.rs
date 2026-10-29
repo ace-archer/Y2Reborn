@@ -683,9 +683,13 @@ pub fn sync(
         manifest.username = account.username.clone();
         manifest.synced_at = 0;
     }
-    // Keep what is there unchanged; everything else is copied again.
+    // Keep what is there unchanged; everything else is copied again. Another
+    // quality changes nothing for a song it would not transcode (an MP3 no
+    // larger is the original at either).
     let unchanged = |s: &Song, k: &Kept| {
-        k.size == s.size && k.quality == options.quality && dir.join(&k.path).is_file()
+        k.size == s.size
+            && s.transcode(k.quality) == s.transcode(options.quality)
+            && dir.join(&k.path).is_file()
     };
     let wanted_ids: HashMap<&str, &Song> = wanted.iter().map(|s| (s.id.as_str(), s)).collect();
     let mut summary = Summary {
@@ -1171,6 +1175,44 @@ mod tests {
             .join("Bauhaus/Mask/01 Kick in the Eye.flac")
             .is_file());
         assert!(own.is_file(), "files the sync did not put there stay");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn another_quality_copies_only_the_songs_it_changes() {
+        let root = dir("quality");
+        let music = root.join("music");
+        let mut small = song("s1", "Hollow Hills", 10);
+        small.suffix = "mp3".into();
+        small.bitrate_kbps = 256;
+        let songs = vec![small, song("s2", "Kick in the Eye", 20)];
+        let client = fake::server(&root, &songs, &[]);
+        let never = AtomicBool::new(false);
+        let at = |quality| {
+            let mut seen = vec![];
+            let summary = sync(
+                &client,
+                &music,
+                &Options {
+                    quality,
+                    ..options(SyncScope::All)
+                },
+                &never,
+                &mut |p| seen.push(p),
+            )
+            .unwrap();
+            (summary.downloaded, summary.removed, seen[0].total)
+        };
+        assert_eq!(at(SyncQuality::Original), (2, 0, 2));
+        // The 256 kbit/s MP3 is the same file at MP3 320: only the FLAC changes.
+        assert_eq!(at(SyncQuality::Mp3High), (1, 1, 1));
+        assert_eq!(at(SyncQuality::Original), (1, 1, 1));
+        assert_eq!(at(SyncQuality::Original), (0, 0, 0));
+        let sync_dir = folder(&music);
+        assert!(sync_dir.join("Bauhaus/Mask/01 Hollow Hills.mp3").is_file());
+        assert!(sync_dir
+            .join("Bauhaus/Mask/01 Kick in the Eye.flac")
+            .is_file());
         fs::remove_dir_all(root).unwrap();
     }
 
