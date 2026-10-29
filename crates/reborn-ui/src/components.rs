@@ -189,6 +189,17 @@ pub(crate) fn status_cluster(c: &mut Canvas, ui: &Ui, m: &AppModel, tint: u32, r
         );
         right -= step;
     }
+    // A music server sync is running (on any screen).
+    if ui.music_server.running.is_some() {
+        c.icon(
+            Icon::Refresh,
+            right - step / 2. + 3.,
+            18.,
+            radio,
+            color::ACCENT,
+        );
+        right -= step;
+    }
     if let Some(time) = ui.clock(m) {
         let w = text::width(clock, &time);
         right -= w + 2.;
