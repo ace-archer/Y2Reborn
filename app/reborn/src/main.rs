@@ -2500,6 +2500,14 @@ impl Runtime {
         }
         match e {
             Effect::None => {}
+            // A sleep asked for during a music server sync (Settings > Sleep,
+            // the control socket) only turns the screen off: asleep, the
+            // download would stop. The automatic sleep follows the sync.
+            Effect::Platform(reborn_core::PlatformTask::SleepRequest)
+                if self.music_server.busy() =>
+            {
+                self.effect_inner(Effect::ScreenSleep)?;
+            }
             Effect::Platform(task) => {
                 if task == reborn_core::PlatformTask::SleepRequest
                     && !matches!(

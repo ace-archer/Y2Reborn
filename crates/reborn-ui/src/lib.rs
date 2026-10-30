@@ -1950,10 +1950,13 @@ impl Ui {
             Action::ScreenSleep => return Effect::ScreenSleep,
             Action::ScreenWake => return Effect::ScreenWake,
             Action::PowerShort => {
+                // A music server sync keeps going with the screen off, as
+                // music plays on: asleep, its download would stop.
                 if matches!(
                     m.playback,
                     reborn_core::PlaybackState::Playing | reborn_core::PlaybackState::Buffering
-                ) {
+                ) || self.music_server.running.is_some()
+                {
                     return Effect::ScreenSleep;
                 }
                 // As stock: the screen goes off at once and a wake returns to

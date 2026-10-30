@@ -59,7 +59,9 @@
 - Server Playlists ignores a listing asked for before a Disconnect or another sign-in.
 - While a sync runs, the status bar shows the sync arrows (icon `sync`) in the accent to the left of Wi-Fi, on every screen.
 - A sync keeps the player awake and Wi-Fi up (`automatic_sleep_tick`, `wifi_idle_tick` count it as work, and
-  `dark_and_quiet` too, so the main loop keeps its pace with the screen off), stops when a
+  `dark_and_quiet` too, so the main loop keeps its pace with the screen off); a short Power press during a sync only
+  turns the screen off, as during playback, and a sleep asked for elsewhere does the same: asleep, the download would
+  stop, stops when a
   computer opens the drives or the chosen card goes away, and asks for a quick library scan when it changed anything.
   Wrong login on a sync forgets the account. Disconnect and Reset Settings forget the account; synced music stays.
 - Storage's rows shrink from 44 px to fit (Scan, Music Server and the occasional computer, setup and repair rows). Skin

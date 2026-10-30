@@ -2566,6 +2566,13 @@ fn power_short_sleeps_when_paused_and_blanks_during_playback() {
         ui.model_action(&mut m, Action::PowerShort),
         Effect::Platform(PlatformTask::SleepRequest)
     );
+    // A music server sync only blanks too: asleep, it would stall.
+    ui.music_server.running = Some((3, 10));
+    assert_eq!(
+        ui.model_action(&mut m, Action::PowerShort),
+        Effect::ScreenSleep
+    );
+    ui.music_server.running = None;
     assert_eq!(
         m.screen,
         Screen::Home,
