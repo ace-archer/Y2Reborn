@@ -32,9 +32,10 @@ use std::{
 
 const LIMIT: u64 = 1024 * 1024;
 const PROGRAM: &str = "/usr/sbin/y2-platform";
-pub const STATUS_SCHEMA: &str = "org.y2linux.status/v1";
-pub const CAPABILITIES_SCHEMA: &str = "org.y2linux.capabilities/v1";
-pub const HEALTH_SCHEMA: &str = "org.y2linux.health/v1";
+use y2p_contract::schema as schemas;
+pub use y2p_contract::schema::{
+    CAPABILITIES as CAPABILITIES_SCHEMA, HEALTH as HEALTH_SCHEMA, STATUS as STATUS_SCHEMA,
+};
 
 /// A typed reply for one task.
 pub enum Reply {
@@ -237,7 +238,7 @@ fn execute(task: PlatformTask) -> Reply {
         SleepRequest => {
             return Reply::Sleep(
                 call(&["sleep", "request"], 30)
-                    .and_then(|v| schema(v, "org.y2linux.sleep/v1"))
+                    .and_then(|v| schema(v, schemas::SLEEP))
                     .map(|v| sleep(&v))
                     .map_err(|e| friendly_error(&e)),
             );
@@ -528,6 +529,9 @@ pub fn friendly_error(error: &str) -> String {
         "Software updates are installed using a computer."
     } else if e.contains("clock") || e.contains("tls") || e.contains("network") {
         "Connect to Wi-Fi to check for updates."
+    } else if e.contains("update_in_progress") {
+        // Y2Linux 8.44: a check or download already holds the update (the daily check, say).
+        "An update check is already running. Try again in a moment."
     } else if e.contains("timeout") {
         "That took too long. Please try again."
     } else if e.contains("starting") || e.contains("unavailable") || e.contains("not_found") {
@@ -683,7 +687,7 @@ pub fn usb(status: &Value) -> UsbTransfer {
         return UsbTransfer::Disconnected;
     }
     let transfer = &status["system"]["usb"]["file_transfer"];
-    if transfer["schema"] == "org.y2linux.usb-transfer/v1"
+    if transfer["schema"] == schemas::USB_TRANSFER
         && transfer["boot_id"] == status["record"]["boot_id"]
         && transfer["boot_id"].as_str().is_some()
     {
@@ -709,17 +713,29 @@ pub fn usb(status: &Value) -> UsbTransfer {
 /// receipt in RAM, without the status call (≈1.6 s): read twice a second, so
 /// the computer screen follows the cable on every screen (Beta 7.1).
 pub fn usb_now() -> UsbTransfer {
-    usb_from(
-        Path::new("/sys/class/udc"),
-        Path::new(USB_RECEIPT),
-        Path::new(BOOT_ID),
-    )
+    // The boot never changes while Reborn runs: read once (this runs every
+    // second, also between the main loop's passes while the screen is dark).
+    static BOOT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    let boot = match BOOT.get() {
+        Some(boot) => boot.as_str(),
+        None => match fs::read_to_string(BOOT_ID) {
+            Ok(id) if !id.trim().is_empty() => BOOT.get_or_init(|| id.trim().to_owned()),
+            _ => "",
+        },
+    };
+    usb_with_boot(Path::new("/sys/class/udc"), Path::new(USB_RECEIPT), boot)
 }
 
 const USB_RECEIPT: &str = "/run/y2/usb-transfer.json";
 const BOOT_ID: &str = "/proc/sys/kernel/random/boot_id";
 
+#[cfg(test)]
 fn usb_from(udc: &Path, receipt: &Path, boot_id: &Path) -> UsbTransfer {
+    let boot = fs::read_to_string(boot_id).unwrap_or_default();
+    usb_with_boot(udc, receipt, boot.trim())
+}
+
+fn usb_with_boot(udc: &Path, receipt: &Path, boot: &str) -> UsbTransfer {
     let udcs: Vec<Value> = fs::read_dir(udc)
         .into_iter()
         .flatten()
@@ -731,9 +747,8 @@ fn usb_from(udc: &Path, receipt: &Path, boot_id: &Path) -> UsbTransfer {
         .ok()
         .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
         .unwrap_or(Value::Null);
-    let boot = fs::read_to_string(boot_id).unwrap_or_default();
     usb(&json!({
-        "record": {"boot_id": boot.trim()},
+        "record": {"boot_id": boot},
         "system": {"usb": {"udcs": udcs, "file_transfer": transfer}},
     }))
 }
@@ -968,7 +983,7 @@ pub fn radio_firmware(status: &Value) -> RadioFirmware {
 
 fn usb_refresh_generation(status: &Value) -> u64 {
     let transfer = &status["system"]["usb"]["file_transfer"];
-    if transfer["schema"] == "org.y2linux.usb-transfer/v1"
+    if transfer["schema"] == schemas::USB_TRANSFER
         && transfer["boot_id"] == status["record"]["boot_id"]
         && transfer["boot_id"].as_str().is_some()
     {
@@ -1005,7 +1020,7 @@ fn sbc_quality(value: &Value) -> Option<SbcQuality> {
 }
 
 pub fn bluetooth_quality(value: &Value) -> BluetoothQuality {
-    if value["schema"] != "org.y2linux.codec-settings/v1" {
+    if value["schema"] != schemas::CODEC_SETTINGS {
         return BluetoothQuality::default();
     }
     BluetoothQuality {
@@ -1047,7 +1062,7 @@ pub fn bluetooth_quality(value: &Value) -> BluetoothQuality {
 /// A successful kernel exit is insufficient: only the service's complete
 /// restoration record and same-boot identity may present a restored player.
 pub fn sleep(value: &Value) -> SleepState {
-    if value["schema"] != "org.y2linux.sleep/v1" {
+    if value["schema"] != schemas::SLEEP {
         return SleepState::default();
     }
     let mut phase = match value["state"].as_str() {
@@ -1588,6 +1603,10 @@ pub fn unobserved() -> PlatformSnapshot {
 }
 
 #[cfg(test)]
+#[path = "contract_tests.rs"]
+mod contract_tests;
+
+#[cfg(test)]
 mod tests {
     #[test]
     fn reborns_write_window_ends_only_with_its_last_user() {
@@ -2119,6 +2138,7 @@ mod tests {
         assert!(friendly_error("wrong_key").contains("password"));
         assert!(friendly_error("dhcp_timeout").contains("network address"));
         assert!(friendly_error("dns_unavailable").contains("name lookup"));
+        assert!(friendly_error("update_in_progress").contains("already running"));
         let raw = friendly_error("org.bluez.Error.Failed private details");
         assert!(!raw.contains("org.bluez") && !raw.contains("private"));
     }

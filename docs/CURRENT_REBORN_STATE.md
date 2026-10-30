@@ -1,6 +1,6 @@
 # Current Reborn state on the Y2
 
-## Music server sync — work in progress (not published; on top of 1.0.0-beta.8.43)
+## Music server sync — work in progress (not published; on top of 1.0.0-beta.9.0)
 
 - Settings → Storage → Music Server: Jellyfin, or any server speaking the Subsonic API (Navidrome, Gonic, Airsonic,
   Ampache, LMS, …). Sign in with the server's address, username and password (the full-screen keyboard; the address
@@ -58,7 +58,17 @@
 - Storage's rows shrink from 44 px to fit (Scan, Music Server and the occasional computer, setup and repair rows). Skin
   layout names `music_server`, `music_server_playlists` (Server Playlists). Previews 97–97e. A Navidrome sync has run on a player; Jellyfin and OpenSubsonic API keys are host-tested only.
 
-## 1.0.0-beta.8.43 — Y2Linux 1.0 Beta 8.43 (Baseline 164), 2026-10-28 (latest): issue fixes
+## 1.0.0-beta.9.0 — Y2Linux 1.0 Beta 9.0 (Baseline 186), 2026-10-30 (latest): the platform in Rust
+
+Published as `baseline-186` (Reborn `2bc1e2c`; sequence 11400). The platform underneath is Rust now; Reborn reads it
+through the shared `y2p-contract` crate, and its contract test (`crates/reborn-platform/tests`) runs every platform
+golden through Reborn's own parsers. Reborn itself: a quieter dark idle (main loop and watchdog every 5 s instead of
+1 s while dark and quiet, observations every 10 s; `639049b`), automatic sleep waits while the battery shows a cable
+after a `charger_or_usb_active` refusal (`764b024`, `68af9ac`), `metrics` answered by the control thread (`7afa346`),
+"An update check is already running" for `update_in_progress` (`9859348`). 738 workspace tests. Details:
+[Y2Linux Beta 9.0 report](https://github.com/SchulzCode/Y2Linux/blob/main/docs/validation/Y2-LINUX-1.0-BETA-9.0.md).
+
+## 1.0.0-beta.8.43 — Y2Linux 1.0 Beta 8.43 (Baseline 164), 2026-10-28: issue fixes
 
 Published as `baseline-164` (Reborn `a08ca5d`, fixes `2eada03`; sequence 11000). #51: Cancel and a held Back leave
 Search to the screen it was opened from (the router remembers the Back press; the keyboard's dead `Leave` path is

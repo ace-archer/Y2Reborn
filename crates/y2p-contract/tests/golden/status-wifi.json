@@ -1,0 +1,56 @@
+{
+ "record": {
+  "boot_id": "boot-a",
+  "build_id": "fixture-build",
+  "collection_duration_ns": 20517121,
+  "evidence_level": "IMPLEMENTED",
+  "failure": null,
+  "kernel": "6.18.0-fixture",
+  "monotonic_ns": 120216880008787,
+  "parameters": {},
+  "reborn_commit": "reborn",
+  "result": "observed",
+  "rootfs_release": "v1.0",
+  "units": {
+   "collection_duration": "ns"
+  },
+  "wall_timestamp": "2026-10-30T18:39:20.781026+00:00",
+  "workload": "observation",
+  "y2linux_commit": "linux-commit"
+ },
+ "schema": "org.y2linux.status/v1",
+ "wifi": {
+  "association": null,
+  "association_id": null,
+  "coexistence": null,
+  "default_route": [],
+  "dns_ready": false,
+  "events": {
+   "association_active": null,
+   "boot_id": "boot-a",
+   "connected": 1,
+   "disconnected": 0,
+   "last_event": "CONNECTED",
+   "link_counts_since_s": null,
+   "radio_off_disconnects": 0,
+   "real_disconnects": 0,
+   "reconnects": 0,
+   "service_restart": 0
+  },
+  "failed_network_id": null,
+  "ip_addresses": [],
+  "power_save": null,
+  "radio_present": false,
+  "reason": "radio_off",
+  "reconnect_owner": "wpa_supplicant",
+  "rssi_dbm": null,
+  "signal_observation": null,
+  "state": "Off",
+  "supplicant_observation": {
+   "duration_ns": null,
+   "ok": null,
+   "reason": "radio_off"
+  },
+  "traffic_counters": {}
+ }
+}
