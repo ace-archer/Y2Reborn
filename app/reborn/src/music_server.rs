@@ -33,8 +33,9 @@ pub enum Reply {
     Progress(api::Progress),
     /// The sync's outcome, and whether it was the automatic one.
     Done(Result<api::Summary, api::Error>, bool),
-    /// The server's playlists, for choosing.
-    Playlists(Result<Vec<api::Playlist>, api::Error>),
+    /// The server's playlists, for choosing, and the account they belong to
+    /// (`SyncChoice::account_key`).
+    Playlists(String, Result<Vec<api::Playlist>, api::Error>),
 }
 
 struct Running {
@@ -275,9 +276,10 @@ impl Runtime {
             self.music_server.playlists.error = Some("Connect to Wi-Fi first".into());
             return;
         }
+        let key = SyncChoice::account_key(&account.server, &account.username);
         let started = self.music_server_spawn("server-lists", move |tx| {
             let listed = api::Client::new(account).playlist_list();
-            let _ = tx.send(Reply::Playlists(listed));
+            let _ = tx.send(Reply::Playlists(key, listed));
         });
         let lists = &mut self.music_server.playlists;
         lists.loading = started;
@@ -464,7 +466,17 @@ impl Runtime {
                     Err(e) => self.ui.flash(e.message()),
                 }
             }
-            Reply::Playlists(result) => {
+            Reply::Playlists(key, result) => {
+                // Asked before a Disconnect or another sign-in: not this
+                // account's playlists.
+                let current = self
+                    .music_server
+                    .account
+                    .as_ref()
+                    .map(|a| SyncChoice::account_key(&a.server, &a.username));
+                if current.as_deref() != Some(key.as_str()) {
+                    return;
+                }
                 let lists = &mut self.music_server.playlists;
                 lists.loading = false;
                 match result {
@@ -508,7 +520,7 @@ impl Runtime {
                             }),
                         );
                         self.music_server.known_root = None;
-                        if s.downloaded > 0 || s.removed > 0 || s.playlists > 0 {
+                        if s.downloaded > 0 || s.removed > 0 || s.playlists_changed > 0 {
                             self.music_server.scan_wanted = true;
                         }
                         let said = if s.full {

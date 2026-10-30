@@ -37,9 +37,14 @@
   `Playlists/<name>.m3u8` with relative entries (a server playlist named Favorites is written as `Favorites (Server)`,
   so it is not taken for the player's own), plus `Music Server/.sync.json` listing what the sync put there (it travels
   with the card). The list is saved at most every 60 s during a sync and on every stop. Only listed files are ever
-  replaced or removed (another server or quality keeps a file it would put at the same place, the same file, so
-  Navidrome → Jellyfin over one library or Original → MP3 for MP3s copies nothing again); each song is downloaded to a hidden `.part` and renamed whole; at least 256 MiB stay free. Songs
-  the server refuses are counted and tried again next time. Nothing goes before the copying, so the library keeps
+  replaced or removed, and a new song never takes the place of a file there that isn't listed (it gets ` (id)` in its
+  name; an original already there as large as the server's is taken over instead). Songs under ids no longer wanted
+  (another server, or the same one after its library was added again) hand their file to a song the server would put
+  at the same place as the same file (`adopt`), so Navidrome → Jellyfin over one library, new Jellyfin ids or Original →
+  MP3 for MP3s copies nothing again. Each song is listed once (`search3` pages follow the entries sent); each song is downloaded to a hidden `.part` and renamed whole; at least 256 MiB stay free. Songs
+  the server refuses are counted and tried again next time. A listing reply over 32 MiB is refused at once. A sync
+  without a trusted clock (http) keeps the last sync's time, or records an unknown one, instead of "never". The library
+  is scanned after a sync that copied or removed songs or wrote or removed a playlist file. Nothing goes before the copying, so the library keeps
   playing during a sync: a song copied again keeps its old file until the new one is in, and songs no longer wanted
   (or another account's) go at the end, or first when the space runs out. A song whose file is gone from storage that
   is there says "This song isn't on the player anymore", not to reinsert the SD card.
@@ -51,8 +56,10 @@
   The page's refusals (Connect to Wi-Fi first, Insert a working SD card first, …) show as written, not as
   `friendly_error`'s "Couldn't complete that"; Settings → Last.fm's refusals (Connect to Wi-Fi first, This build has no
   Last.fm key, …) likewise.
+- Server Playlists ignores a listing asked for before a Disconnect or another sign-in.
 - While a sync runs, the status bar shows the sync arrows (icon `sync`) in the accent to the left of Wi-Fi, on every screen.
-- A sync keeps the player awake and Wi-Fi up (`automatic_sleep_tick`, `wifi_idle_tick` count it as work), stops when a
+- A sync keeps the player awake and Wi-Fi up (`automatic_sleep_tick`, `wifi_idle_tick` count it as work, and
+  `dark_and_quiet` too, so the main loop keeps its pace with the screen off), stops when a
   computer opens the drives or the chosen card goes away, and asks for a quick library scan when it changed anything.
   Wrong login on a sync forgets the account. Disconnect and Reset Settings forget the account; synced music stays.
 - Storage's rows shrink from 44 px to fit (Scan, Music Server and the occasional computer, setup and repair rows). Skin

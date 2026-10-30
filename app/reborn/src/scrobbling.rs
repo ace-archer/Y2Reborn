@@ -292,7 +292,11 @@ impl Runtime {
                 Err("The clock isn't set yet; try again in a moment".to_owned())
             }
             LastFmRequest::Connect => {
-                let client = self.lastfm.client.clone().ok_or("no key")?;
+                let client = self
+                    .lastfm
+                    .client
+                    .clone()
+                    .ok_or("This build has no Last.fm key")?;
                 self.lastfm.busy = self.lastfm_spawn("lastfm-token", move || {
                     Reply::Token(client.token().map(|t| {
                         let url = client.approval_url(&t);
@@ -302,7 +306,11 @@ impl Runtime {
                 Ok(())
             }
             LastFmRequest::Login { username, password } => {
-                let client = self.lastfm.client.clone().ok_or("no key")?;
+                let client = self
+                    .lastfm
+                    .client
+                    .clone()
+                    .ok_or("This build has no Last.fm key")?;
                 self.lastfm.busy = self.lastfm_spawn("lastfm-login", move || {
                     Reply::Session(client.mobile_session(&username, &password), false)
                 });

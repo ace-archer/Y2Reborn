@@ -122,11 +122,13 @@ impl Client {
     }
     fn searched_songs(&self, cancel: &AtomicBool) -> Result<Vec<Song>, Error> {
         let mut songs = vec![];
+        // Counted in entries the server sent: songs leaves some out.
+        let mut sent = 0;
         loop {
             if cancel.load(Ordering::Relaxed) {
                 return Err(Error::Cancelled);
             }
-            let offset = songs.len().to_string();
+            let offset = sent.to_string();
             let count = PAGE.to_string();
             let v = self.call(
                 "search3",
@@ -140,6 +142,7 @@ impl Client {
             )?;
             let page = list(v.get("searchResult3").and_then(|r| r.get("song")));
             let n = page.len();
+            sent += n;
             songs.extend(page.into_iter().filter_map(song));
             if n < PAGE || songs.len() >= MAX_SONGS {
                 return Ok(songs);
@@ -433,6 +436,40 @@ mod tests {
         let asked = fs::read_to_string(root.join("requests")).unwrap();
         assert!(asked.contains("getAlbumList2?") && asked.contains("type=alphabeticalByName"));
         assert!(asked.contains("getAlbum?") && asked.contains("id=al1"));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn search_pages_follow_what_the_server_sent() {
+        // A full page with a video in it: the next page starts after the
+        // page, not after the songs kept from it.
+        let root = dir("pages");
+        let entry =
+            |i: usize| serde_json::json!({"id": format!("s{i}"), "title": "t", "isVideo": i == 0});
+        let page = |from: usize, n: usize| {
+            fake::ok(serde_json::json!({"searchResult3": {"song":
+                (from..from + n).map(entry).collect::<Vec<_>>()}}))
+        };
+        fs::write(root.join("first.json"), page(0, PAGE)).unwrap();
+        fs::write(root.join("second.json"), page(PAGE, 1)).unwrap();
+        fs::write(root.join("overlap.json"), page(PAGE - 1, 2)).unwrap();
+        let curl = testing::curl(
+            &root,
+            &format!(
+                "*songOffset=0*) cat {r}/first.json ;;\n\
+                 *songOffset={PAGE}*) cat {r}/second.json ;;\n\
+                 *songOffset=*) cat {r}/overlap.json ;;",
+                r = root.display()
+            ),
+        );
+        let client = Client {
+            account: Account::subsonic_token("http://nd.local".into(), "luca".into(), "pw"),
+            curl,
+        };
+        let songs = client.songs(&AtomicBool::new(false)).unwrap();
+        let ids: std::collections::HashSet<&str> = songs.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!((songs.len(), ids.len()), (PAGE, PAGE));
+        assert!(!ids.contains("s0") && ids.contains(format!("s{PAGE}").as_str()));
         fs::remove_dir_all(&root).unwrap();
     }
 
